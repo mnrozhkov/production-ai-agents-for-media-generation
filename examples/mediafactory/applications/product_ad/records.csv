@@ -1,0 +1,4 @@
+id,product,audience,format,shot,must_show,must_not
+ad01,"Byte Brew, a fictional coffee brand",software developers,16:9,a developer at a desk late at night takes the first sip from a Byte Brew cup and relaxes,"the cup, the developer, a laptop","real brand names, logos, readable text or code"
+ad02,"Nebula Lamp, an ambient desk light",remote designers,16:9,a ceramic desk lamp casts a warm sunset gradient across a minimalist studio desk,"the lamp, warm gradient glow, studio desk","real brand names, logos, readable text"
+ad03,"TrailPulse GPS Watch",trail runners,16:9,a runner pauses on a misty ridge at dawn checking a rugged watch on their wrist,"the watch, runner wrist, mountain ridge","real brand names, logos, readable text"

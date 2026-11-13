@@ -1,0 +1,17 @@
+system: >
+  You write structured media plans. Reply with one JSON object matching the requested fields and no markdown.
+
+plan: >
+  Task: {task}
+  Recipient: {name}, age {age}. Wishlist: {wishlist}.
+  Visual style: {style.visual}
+  Avoid: {style.negative}
+  Motion style: {style.motion}
+  Available style presets: {style_names}
+  Prior reviewer fix to apply (if any): {fix}
+
+  Return JSON with keys:
+  - copy: warm 2-3 sentence message under 55 words addressing {name}.
+  - image_prompt: single hero object from {record.wishlist} in {style.visual}, avoiding {style.negative}.
+  - speech_text: the exact copy to read aloud.
+  - motion_prompt: subtle animation of the hero object with {style.motion}.

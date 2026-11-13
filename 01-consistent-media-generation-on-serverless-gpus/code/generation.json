@@ -1,0 +1,15 @@
+{
+  "model": "Efficient-Large-Model/Sana_1600M_1024px_diffusers",
+  "model_revision": "ac0da2ff55fbe434795be0dce883042e4d49e2fc",
+  "variant": "fp16",
+  "prompt": "A centered Christmas storybook illustration of a brass telescope glowing softly on snow under a starry night sky, surrounded by a small decorated Christmas tree, wrapped presents, twinkling lights, gentle falling snow, warm vibrant colors, whimsical children's-book art style, no people, no text",
+  "seed": 7,
+  "params": {
+    "width": 1024,
+    "height": 1024,
+    "num_inference_steps": 20,
+    "guidance_scale": 4.5,
+    "negative_prompt": ""
+  },
+  "image": null
+}

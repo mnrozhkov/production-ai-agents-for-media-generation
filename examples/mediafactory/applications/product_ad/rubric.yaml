@@ -1,0 +1,10 @@
+rubric_version: "v1"
+pass_score: 70
+weak_score: 35
+criteria:
+  - id: must_show
+    text: "The keyframe clearly includes every required element in record.must_show."
+  - id: must_not
+    text: "The keyframe excludes everything listed in record.must_not and style.negative."
+  - id: shot_composition
+    text: "The keyframe matches record.shot and is suitable for image-to-video animation."

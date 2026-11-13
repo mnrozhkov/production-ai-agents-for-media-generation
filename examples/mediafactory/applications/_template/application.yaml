@@ -1,0 +1,53 @@
+name: custom_template
+version: 1
+task: >
+  Create a personalized visual card and spoken narration for each item in the table.
+
+records:
+  path: records.csv
+  required: [id, title, audience]
+
+styles:
+  default: clean
+  column: style
+  presets:
+    clean:
+      visual: "clean editorial illustration, balanced lighting, centered subject, no text"
+      negative: "letters, logos, watermarks, blurry details"
+      motion: "slow pan across the centered subject"
+      voice: "af_heart"
+      music: "warm"
+
+stages:
+  - name: plan
+  - name: image
+    judge: true
+  - name: speech
+    gate_on_image_pass: true
+
+constraints:
+  image:
+    width: 1024
+    height: 1024
+    steps: 20
+    guidance: 4.5
+  speech:
+    duration_s: 15.0
+  record_budget_usd: 1.50
+  run_budget_usd: 10.00
+  pass_rate_floor: 0.70
+
+copy_schema:
+  fields:
+    copy:
+      type: string
+      min_length: 10
+      max_words: 55
+    image_prompt:
+      type: string
+      min_length: 10
+      max_words: 120
+    speech_text:
+      type: string
+      min_length: 10
+      max_words: 55

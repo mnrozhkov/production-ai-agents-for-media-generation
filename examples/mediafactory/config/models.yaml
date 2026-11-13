@@ -1,0 +1,114 @@
+# Every model used by the Personalized Media Factory is configured here.
+# Code asks for a role (`llm`, `image`, `speech`, `video`, `judge`, `audio`);
+# secrets and dynamic Endpoint URLs come from environment variables.
+
+roles:
+  llm:
+    adapter: openai_chat
+    base_url: https://api.tokenfactory.nebius.com/v1
+    api_key_env: TOKEN_FACTORY_API_KEY  # pragma: allowlist secret
+    model: openai/gpt-oss-120b
+    price_in_per_1m_usd: 0.15
+    price_out_per_1m_usd: 0.60
+    options:
+      temperature: 0.7
+      max_tokens: 1024
+
+  judge:
+    adapter: openai_chat
+    base_url: https://api.tokenfactory.nebius.com/v1
+    api_key_env: TOKEN_FACTORY_API_KEY  # pragma: allowlist secret
+    model: moonshotai/Kimi-K3
+    price_in_per_1m_usd: 0.20
+    price_out_per_1m_usd: 0.80
+    options:
+      temperature: 0.0
+      max_tokens: 400
+
+  image:
+    adapter: openai_images
+    url_env: IMAGE_ENDPOINT_URL
+    token_env: IMAGE_ENDPOINT_TOKEN  # pragma: allowlist secret
+    model: Efficient-Large-Model/Sana_1600M_1024px_diffusers
+    model_revision: "ac0da2ff55fbe434795be0dce883042e4d49e2fc"
+    compute:
+      platform: gpu-l40s-a
+      preset: 1gpu-8vcpu-32gb
+    options:
+      size: 1024x1024
+      steps: 20
+      guidance: 4.5
+
+  speech:
+    adapter: openai_speech
+    url_env: SPEECH_ENDPOINT_URL
+    token_env: SPEECH_ENDPOINT_TOKEN  # pragma: allowlist secret
+    model: hexgrad/Kokoro-82M
+    model_revision: "f3ff3571791e39611d31c381e3a41a3af07b4987"
+    compute:
+      platform: gpu-l40s-a
+      preset: 1gpu-8vcpu-32gb
+    options:
+      voice: af_heart
+      duration_s: 15.0
+
+  video:
+    adapter: wan_omni
+    url_env: VIDEO_ENDPOINT_URL
+    token_env: VIDEO_ENDPOINT_TOKEN  # pragma: allowlist secret
+    model: Wan-AI/Wan2.2-I2V-A14B-Diffusers
+    model_revision: "b8fff7315c768468a5333511427288870b2e9635"
+    compute:
+      platform: gpu-h100-sxm
+      preset: 1gpu-16vcpu-200gb
+    options:
+      size: 832x480
+      fps: 24
+      frames: 121
+      steps: 30
+      guidance: 5.0
+
+  audio:
+    adapter: acestep_audio
+    url_env: AUDIO_ENDPOINT_URL
+    token_env: AUDIO_ENDPOINT_TOKEN  # pragma: allowlist secret
+    model: ACE-Step/acestep-v15-xl-turbo-diffusers
+    model_revision: "200ba991ae448051e14b0183157e35c2d27c9fb0"
+    compute:
+      platform: gpu-l40s-a
+      preset: 1gpu-8vcpu-32gb
+    options:
+      duration_s: 8.0
+      steps: 8
+
+profiles:
+  l40s:
+    video:
+      model: Wan-AI/Wan2.2-TI2V-5B-Diffusers
+      model_revision: "b8fff7315c768468a5333511427288870b2e9635"
+      compute:
+        platform: gpu-l40s-a
+        preset: 1gpu-8vcpu-32gb
+
+policy:
+  max_image_attempts: 3
+  max_video_attempts: 2
+  max_judge_parse_retries: 2
+  record_budget_usd: 1.50
+  run_budget_usd: 25.00
+  gate_video_on_image_pass: true
+  gate_speech_on_image_pass: true
+  estimate_image_seconds: 12.0
+  estimate_speech_seconds: 4.0
+  estimate_video_seconds: 120.0
+  estimate_audio_seconds: 8.0
+
+job:
+  image: ""
+  platform: gpu-l40s-a
+  preset: 1gpu-8vcpu-32gb
+  preemptible: true
+  disk_gb: 200
+  timeout_min: 60
+  mount_path: /data
+  hf_home: /data/models

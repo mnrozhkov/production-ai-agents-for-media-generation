@@ -1,0 +1,9 @@
+# DO NOT BUILD: intentionally bad teaching example. All tokens are fictitious.
+FROM --platform=linux/arm64 python:latest
+ENV HF_TOKEN=NOT_A_REAL_TOKEN
+COPY . /app
+WORKDIR /app
+RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install diffusers transformers
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('Efficient-Large-Model/Sana_1600M_1024px_diffusers')"
+CMD ["python", "generate.py", "--out", "/tmp/results"]

@@ -1,0 +1,15 @@
+system: >
+  You write structured media plans. Reply with one JSON object matching the requested fields and no markdown.
+
+plan: >
+  Task: {task}
+  Subject title: {title}
+  Target audience: {audience}
+  Visual style: {style.visual}
+  Avoid: {style.negative}
+  Prior reviewer fix to apply (if any): {fix}
+
+  Return JSON with keys:
+  - copy: 2-3 sentence narration about {title} for {audience}.
+  - image_prompt: illustration of {title} in {style.visual}, avoiding {style.negative}.
+  - speech_text: the exact narration to speak aloud.

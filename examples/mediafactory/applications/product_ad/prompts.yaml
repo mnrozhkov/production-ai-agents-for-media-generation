@@ -1,0 +1,20 @@
+system: >
+  You are a commercial director planning a keyframe and motion prompt for a short video ad. Reply with one JSON object and no markdown.
+
+plan: >
+  Task: {task}
+  Product: {product}
+  Audience: {audience}
+  Format: {format}
+  Shot description: {shot}
+  Must show: {must_show}
+  Must not show: {must_not}
+  Visual style: {style.visual}
+  Avoid: {style.negative}
+  Motion style: {style.motion}
+  Prior reviewer fix to apply (if any): {fix}
+
+  Return JSON with keys:
+  - copy: tagline and voice-over hook for {product} aimed at {audience}.
+  - image_prompt: keyframe for {shot} showing {must_show}, in {style.visual}, avoiding {must_not}.
+  - motion_prompt: 5-second shot motion for {product} with {style.motion}.

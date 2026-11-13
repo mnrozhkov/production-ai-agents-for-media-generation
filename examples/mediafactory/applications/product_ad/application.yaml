@@ -1,0 +1,60 @@
+name: product_ad
+version: 1
+task: >
+  Turn a product brief into a short commercial keyframe and video ad for the target audience.
+
+records:
+  path: records.csv
+  required: [id, product, audience, format, shot, must_show, must_not]
+
+styles:
+  default: cinematic
+  column: style
+  presets:
+    cinematic:
+      visual: "cinematic commercial photography, warm desk lighting, shallow depth of field, no readable text"
+      negative: "real brand names, logos, readable text, code on screen, watermarks"
+      motion: "smooth dolly-in camera movement, subtle steam rising, natural motion"
+      voice: "af_heart"
+      music: "warm"
+
+stages:
+  - name: plan
+  - name: image
+    judge: true
+  - name: video
+    from: image
+    gate_on_image_pass: true
+
+constraints:
+  image:
+    width: 1024
+    height: 1024
+    steps: 20
+    guidance: 4.5
+  video:
+    width: 832
+    height: 480
+    duration_s: 5.0
+    fps: 24
+    frames: 121
+    steps: 30
+    guidance: 5.0
+  record_budget_usd: 2.00
+  run_budget_usd: 15.00
+  pass_rate_floor: 0.70
+
+copy_schema:
+  fields:
+    copy:
+      type: string
+      min_length: 10
+      max_words: 55
+    image_prompt:
+      type: string
+      min_length: 10
+      max_words: 120
+    motion_prompt:
+      type: string
+      min_length: 10
+      max_words: 80

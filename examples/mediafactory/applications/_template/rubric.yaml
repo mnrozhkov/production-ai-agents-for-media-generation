@@ -1,0 +1,8 @@
+rubric_version: "v1"
+pass_score: 70
+weak_score: 35
+criteria:
+  - id: subject
+    text: "The image depicts record.title clearly."
+  - id: style
+    text: "The image follows style.visual and avoids style.negative."

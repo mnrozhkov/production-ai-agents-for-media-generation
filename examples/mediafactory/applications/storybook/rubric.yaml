@@ -1,0 +1,10 @@
+rubric_version: "v1"
+pass_score: 70
+weak_score: 35
+criteria:
+  - id: subject
+    text: "The image clearly shows the hero object requested for record.wishlist."
+  - id: style
+    text: "The visual style matches style.visual and contains nothing from style.negative."
+  - id: no_text
+    text: "The image contains no readable text, letters, watermarks, or logos."

@@ -1,0 +1,21 @@
+# Lesson 3.6 style LoRA fine-tuning configuration template (AI Toolkit compatible).
+name: storybook_style_lora
+base_model: Efficient-Large-Model/Sana_1600M_1024px_diffusers
+model_revision: ac0da2ff55fbe434795be0dce883042e4d49e2fc
+trigger_word: storybook_v1
+rank: 16
+alpha: 16
+steps: 600
+learning_rate: 0.0001
+batch_size: 2
+resolution: 1024
+sample_every: 200
+sample_prompts:
+  - "storybook_v1 illustration of a brass telescope on snow under a starry sky, no text"
+  - "storybook_v1 illustration of a wooden train set beside warm twinkling lights, no text"
+compute:
+  platform: gpu-l40s-a
+  preset: 1gpu-8vcpu-32gb
+  preemptible: true
+  timeout_min: 90
+output_uri: s3://mediafactory-artifacts/loras/storybook_style_lora.safetensors
