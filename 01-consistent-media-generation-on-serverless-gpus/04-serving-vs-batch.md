@@ -68,15 +68,13 @@ AWS describes the same split: real-time inference is "ideal for online inference
 
 ## The task: Help Santa to Create Christmas Gift Cards
 
-The task comes from the [Santa Scale Challenge](https://github.com/mnrozhkov/santa-scale-challenge), a reference project for making personalized gift cards at scale. The story: Santa writes every child a card. He reads the child's profile, picks a gift from the wishlist and writes a short wish that ends with "Merry Christmas!". The card gets an illustration of the gift, and then it's animated: the camera drifts slowly, snow falls, lights twinkle, and a short piece of music plays under it. One child, one animated card.
+The task comes from the [Santa Scale Challenge](https://github.com/mnrozhkov/santa-scale-challenge), a reference project for making personalized gift cards at scale. The story: Santa writes every child a card. The card gets an illustration of the gift, and then it's animated: the camera drifts slowly, snow falls, lights twinkle, and a short piece of music plays under a spoken greeting. One child, one animated card.
 
-A record is one child: a name, an age and a wishlist.
+A record is one child. The wish, the greeting and the illustration prompt are already in the row, so this lesson does no writing and calls no language model.
 
 ```text
-id,name,age,wishlist
-k01,Emma,7,a telescope
-k02,Lucas,5,a wooden train set
-k03,Noah,9,a robot kit
+id,name,age,wishlist,wish,greeting,prompt
+k01,Emma,7,a telescope,"Dear Emma, at 7 you are full of wonder. I heard you wished for a telescope, and my elves are already busy. Merry Christmas!","Merry Christmas, Emma! Santa heard you wished for a telescope.","A magical Christmas storybook illustration, ... a telescope ..."
 ```
 
 The list is [assets/kids.csv](assets/kids.csv): 200 kids, Emma first.
@@ -85,7 +83,7 @@ We build it as a deterministic pipeline: every kid goes through the same steps i
 
 | Step | Reads | Makes for Emma | Runs on |
 | --- | --- | --- | --- |
-| 1. Text | The profile | Gifts, a wish that ends with "Merry Christmas!", a mood for the music, a greeting to speak | A template, or an LLM if you set a Token Factory key |
+| 1. Text | The row | `card.json`: the wish, the greeting, the illustration prompt | No model: it copies the row |
 | 2. Illustration | The first gift | A picture of the gift on snow under a starry sky. No people and no text: it gets animated later | GPU: Sana |
 | 3. Card | The illustration, the name, the wish | A 1024×1400 card, `card.png` | CPU: Pillow |
 | 4. Clip | The illustration | About 5 seconds of slow camera drift, falling snow and twinkling lights | GPU: Wan2.2-I2V-A14B, image-to-video |
@@ -102,7 +100,7 @@ One card is a notebook exercise. The challenge is the list: N kids, and nobody w
 flowchart LR
     rec[("kids.csv<br/>N kids: 10 to 200")]
     subgraph job["One Job, one GPU: the steps run one after another"]
-        txt["1 · Text<br/>template or LLM"]
+        txt["1 · Text<br/>from kids.csv"]
         img["2 · Illustration<br/>Sana"]
         crd["3 · Card<br/>Pillow, CPU"]
         vid["4 · Clip<br/>Wan2.2 I2V"]
@@ -186,11 +184,36 @@ export RUN_ID=job-001
 
 For each step it loads the model **once**, makes that step's file for every kid, frees the GPU and moves on. Loading once and generating many is the point of a batch: ten separate Jobs for ten kids would pay startup and every model load ten times.
 
+<!-- visual: id=V11 | teaches=what each step hands to the next inside the one Job | shape=flow | must-be-accurate=step order, model per step, the input each step reads | claims=M1-390 -->
+
+```mermaid
+flowchart LR
+    rec[("N kid profiles<br/>10 to 200")] --> txt
+    subgraph job["One Job, one H100: the steps run one after another"]
+        txt["1 · Text<br/>from kids.csv"]
+        img["2 · Illustration<br/>Sana"]
+        crd["3 · Card<br/>Pillow · CPU"]
+        vid["4 · Clip<br/>Wan2.2-I2V-A14B"]
+        spk["5 · Greeting<br/>Kokoro-82M"]
+        mix["6 · Mix<br/>ffmpeg · CPU"]
+        txt -- "image prompt" --> img
+        img -- "illustration" --> crd
+        img -- "illustration" --> vid
+        txt -- "greeting text" --> spk
+        vid -- "clip" --> mix
+        spk -- "greeting" --> mix
+    end
+    crd --> out[("N cards<br/>card.png + card.mp4")]
+    mix --> out
+```
+
+*Conceptual. Each step makes its file for all N kids before the next step starts; every model runs on the same H100.*
+
 Three things to know before you run it:
 
-- **Every file is written once and never changed.** That's what lets `--out` be a bucket mounted into the container: the script saves files to a folder, and they are objects in S3. No upload code. `[verify on first run: MP4 and WAV writers on the bucket mount]`
+- **Every file is written once and never changed.** That's what lets `--out` be a bucket mounted into the container, with no upload code. "How the results are stored" below shows how.
 - **The clip step decides the GPU.** Wan2.2 image-to-video is the largest model in the pipeline: it needs an H100 and about 126 GB of weights, downloaded when the step starts. <!-- c:M1-063 c:M1-328 c:M1-390 --> `--step text --step illustration --step card --step greeting` leaves it out; that part fits an L40S.
-- **The text step uses a fixed template** unless `TOKEN_FACTORY_API_KEY` is set; then an LLM writes the gifts and the wish. The music is one track from the module's shared media, [assets/4_jingle.mp3](assets/4_jingle.mp3); add `<mood>.mp3` files next to it to get a track per mood.
+- **The text step copies the row.** The wish, the greeting and the illustration prompt come from [assets/kids.csv](assets/kids.csv). Nothing calls a language model. The music is one track from the module's shared media, [assets/4_jingle.mp3](assets/4_jingle.mp3); add `<mood>.mp3` files next to it to get a track per mood.
 
 It logs a line for every model load and every finished asset, so the Job's logs show where it is. `--help` lists the options: `--n`, `--out` and `--step`.
 
@@ -247,8 +270,6 @@ Ten kids is the default. For a larger batch in the same Job, change `--n 10` to 
 
 The models load once per Job, however long the list is: the fixed part of the run stays the same, and only the per-card part grows `[measure]`. The clips are most of it: at the 40.66 s per clip we measured for this model through an Endpoint, 200 clips are about 2.3 hours of H100 time `[calc: 200 × 40.66 s; one request from a laptop, 2026-11-13]`, so decide on 200 after you have seen what ten cost. <!-- c:M1-382 -->
 
-To let an LLM write the text, add `--env-secret TOKEN_FACTORY_API_KEY=<your secret>` at the end of any of these commands `[verify]`; without it the template is used. <!-- c:M1-292 -->
-
 **From a notebook.** The same command works in a Jupyter cell on your laptop: set the variables with `%env WORKER_IMAGE=...`, `%env BUCKET=...`, `%env RUN_ID=...`, and put `!` in front of `nebius ai job create`. `[verify on first run]`
 
 ### Path B: the notebook and the script in a DevLab
@@ -272,7 +293,6 @@ A DevLab is JupyterLab on a GPU VM. Here nothing is submitted: you call the pipe
    git pull
    uv sync --extra gpu --extra notebooks
    uv pip install "kokoro>=0.9.2" ftfy imageio imageio-ffmpeg
-   sudo apt-get install -y espeak-ng
    uv run python -m ipykernel install --user --name course-gpu --display-name "course (GPU)"
    ```
 
@@ -332,16 +352,45 @@ The logs show the script's progress: one line when a model has loaded, one for e
 12:…:… finished: /outputs/runs/.../job-001/cards
 ```
 
+## How the results are stored
+
+How the files get to the bucket:
+
+1. The Job command mounts the bucket: `--volume "$BUCKET:/outputs:rw"`. <!-- c:M1-281 c:M1-282 -->
+2. The worker runs with `--out /outputs/runs/01-consistent-media-generation-on-serverless-gpus/$RUN_ID`.
+3. `run()` creates `cards/<kid id>/` under that path, and each step saves its file there with ordinary Python and ffmpeg writes.
+
+What ends up in the bucket (one run, `RUN_ID=job-001`):
+
+```text
+runs/01-consistent-media-generation-on-serverless-gpus/job-001/
+└── cards/
+    ├── k01/
+    │   ├── card.json          1. text: the kid's profile, gifts, wish, mood, greeting, image prompt
+    │   ├── illustration.png   2. Sana
+    │   ├── card.png           3. the card image (final)
+    │   ├── clip.mp4           4. Wan2.2, silent
+    │   ├── greeting.wav       5. Kokoro
+    │   └── card.mp4           6. clip + greeting + music (final)
+    ├── k02/
+    └── ...
+```
+
+- **Two finals per kid:** `card.png` and `card.mp4`. The other four files are intermediates, kept so the next step can read its inputs and so you can inspect each step.
+- **Handover between steps is only through these files.** The illustration step reads the image prompt from `card.json`, the clip step reads `illustration.png`, and so on.
+- **Each file is written once and never edited,** which is what makes writing straight to a bucket mount reasonable. MP4 and WAV writers jump back inside a file to finish its header; whether the mount allows that is checked on the first run `[verify on first run]`. If it doesn't, the worker writes to local disk and copies each finished file over.
+- **No manifest or summary file.** The Job's logs hold the timings, and the folders are the record of what was made.
+
 ## See the results in the bucket
 
-The script wrote everything to your bucket, and the files stay there after the Job's VM is deleted. <!-- c:M1-290 --> List them:
+The files stay in the bucket after the Job's VM is deleted. <!-- c:M1-290 --> List the run:
 
 ```bash
 aws s3 ls --recursive s3://$BUCKET/runs/01-consistent-media-generation-on-serverless-gpus/$RUN_ID/ \
   --endpoint-url https://storage.eu-north1.nebius.cloud
 ```
 
-You should see six files for every kid: `cards/k01/card.json`, `illustration.png`, `card.png`, `clip.mp4`, `greeting.wav` and `card.mp4` `[verify on first run]`. Get Emma's animated card and play it:
+You should see the six files for every kid from the tree above `[verify on first run]`. Get Emma's animated card and play it:
 
 ```bash
 aws s3 cp s3://$BUCKET/runs/01-consistent-media-generation-on-serverless-gpus/$RUN_ID/cards/k01/card.mp4 emma.mp4 \

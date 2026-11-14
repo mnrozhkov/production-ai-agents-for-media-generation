@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import csv
 import gc
-import json
-import os
 import subprocess
 import time
 import wave
@@ -27,23 +25,22 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import typer
-from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from pydantic import BaseModel, Field
 from rich.console import Console
 
 from common import load_pipeline
-from models import GPT_OSS, KOKORO, SANA, WAN_I2V
+from models import KOKORO, SANA, WAN_I2V
 
 if TYPE_CHECKING:
     from diffusers import SanaPipeline, WanImageToVideoPipeline
     from kokoro import KPipeline
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"  # data and media of this module
-KIDS_CSV = ASSETS / "kids.csv"  # id,name,age,wishlist: 200 kids, Emma first
+KIDS_CSV = ASSETS / "kids.csv"  # id,name,age,wishlist,wish,greeting,prompt: 200 kids, Emma first
 FONTS = ASSETS / "fonts"
 DEFAULT_TRACK = ASSETS / "4_jingle.mp3"
 
@@ -78,16 +75,18 @@ class Step(StrEnum):
 
 
 Mood = Literal["warm", "playful", "dreamy", "adventurous", "cozy", "magical", "joyful", "calm"]
-MOODS: tuple[str, ...] = get_args(Mood)
 
 
 class KidProfile(BaseModel):
-    """One row of kids.csv."""
+    """One row of kids.csv. The wish, greeting and illustration prompt are already written."""
 
     id: str
     name: str
     age: int = Field(ge=1, le=18)
     wishlist: str
+    wish: str = Field(min_length=1)
+    greeting: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
 
 
 class CardText(BaseModel):
@@ -116,75 +115,15 @@ def read_card(folder: Path) -> CardText:
 # --- 1. text: gifts, wish, mood and the spoken greeting -----------------------------------------
 
 
-def ask_llm(prompt: str) -> dict[str, Any]:
-    """One JSON answer from the Token Factory chat API. Needs TOKEN_FACTORY_API_KEY."""
-    client = OpenAI(base_url=GPT_OSS.base_url, api_key=os.environ["TOKEN_FACTORY_API_KEY"])
-    reply = client.chat.completions.create(
-        model=GPT_OSS.model,
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-        temperature=GPT_OSS.temperature,
-    )
-    return json.loads(reply.choices[0].message.content)
-
-
-def gift_prompt(kid: KidProfile) -> str:
-    """The prompt that asks the LLM for gift ideas."""
-    return (
-        "You are Santa's gift assistant. Recommend 1-5 thoughtful, safe, age-appropriate gifts "
-        f"(one short phrase each) for {kid.name}, age {kid.age}. Wishlist: {kid.wishlist}. "
-        'Answer as JSON: {"gifts": ["..."]}'
-    )
-
-
-def wish_prompt(kid: KidProfile, gifts: list[str]) -> str:
-    """The prompt that asks the LLM for the wish and a music mood."""
-    return (
-        f"You are Santa Claus writing to {kid.name}, age {kid.age}. Gifts: {', '.join(gifts)}. "
-        "Write a warm wish: address the child by name, hint at the gifts without listing them, "
-        '2-3 short sentences, under 55 words, and end with "Merry Christmas!". '
-        f"Also pick one mood for the music from: {', '.join(MOODS)}. "
-        'Answer as JSON: {"wish": "...", "mood": "..."}'
-    )
-
-
-def image_prompt(gift: str) -> str:
-    """The picture shows the gift, with no people and no text: it gets animated later."""
-    return (
-        "A magical Christmas storybook illustration, centered composition. "
-        f"The hero object: {gift}, glowing softly, placed on snow under a starry night sky. "
-        "Around it: a small decorated Christmas tree, wrapped presents, twinkling lights, "
-        "gentle falling snow. Warm, vibrant colors, whimsical children's-book art style. "
-        "No people, no faces, no text, no letters, no signatures."
-    )
-
-
-def write_text(kid: KidProfile, ask: Callable[[str], dict[str, Any]] | None = None) -> CardText:
-    """Santa picks gifts and writes the wish: a fixed template, or an LLM when `ask` is given."""
-    if ask is None:
-        gifts = [kid.wishlist]
-        wish = (
-            f"Dear {kid.name}, at {kid.age} you are full of wonder. I heard you wished for "
-            f"{kid.wishlist}, and my elves are already busy. Merry Christmas!"
-        )
-        mood = "warm"
-    else:
-        gifts = ask(gift_prompt(kid))["gifts"][:5]
-        if not gifts:
-            raise ValueError(f"text {kid.id}: the LLM returned no gifts")
-        answer = ask(wish_prompt(kid, gifts))
-        wish = answer["wish"]
-        mood = str(answer.get("mood", "")).strip().lower()
-        if mood not in MOODS:
-            log(f"text {kid.id}: mood {mood!r} is not in the list, using 'warm'")
-            mood = "warm"
+def write_text(kid: KidProfile) -> CardText:
+    """Copy the wish, greeting and illustration prompt from the kid's row into card.json."""
     return CardText(
         kid=kid,
-        gifts=gifts,
-        wish=wish.strip(),
-        mood=mood,
-        greeting=f"Merry Christmas, {kid.name}! Santa heard you wished for {kid.wishlist}.",
-        image_prompt=image_prompt(gifts[0]),
+        gifts=[kid.wishlist],
+        wish=kid.wish.strip(),
+        mood="warm",
+        greeting=kid.greeting.strip(),
+        image_prompt=kid.prompt.strip(),
     )
 
 
@@ -352,11 +291,9 @@ def run(n: int = 10, out: Path = Path("runs/santa"), steps: Sequence[Step] = tup
     log(f"{len(kids)} kids, steps: {', '.join(steps)}, out: {cards}")
 
     if Step.TEXT in steps:
-        ask = ask_llm if os.environ.get("TOKEN_FACTORY_API_KEY") else None
-        log(f"text: written by {'the LLM ' + GPT_OSS.model if ask else 'the template'}")
         for i, (kid, folder) in enumerate(zip(kids, folders), 1):
             with progress(Step.TEXT, i, len(kids), kid.id):
-                card = write_text(kid, ask)
+                card = write_text(kid)
                 (folder / "card.json").write_text(card.model_dump_json(indent=2))
 
     if Step.ILLUSTRATION in steps:
