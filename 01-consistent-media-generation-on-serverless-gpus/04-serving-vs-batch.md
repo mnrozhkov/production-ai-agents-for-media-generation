@@ -1,217 +1,434 @@
 ---
 video_url: ""
 code:
-  - label: Batch & GPU worker script
-    path: code/generate.py
-  - label: Endpoint client script
-    path: code/call_endpoint.py
+  - label: Santa cards pipeline (all steps, runs inside the Job)
+    path: code/batch_inference.py
+  - label: Santa cards, one step at a time (notebook)
+    path: code/nb-santa-cards.ipynb
 prev_url: 03-containers.md
 next_url: 05-measuring-costs.md
 ---
-# 1.4 Serving vs Batch Inference: the Same Generation for Different Use Cases
+# 04 - Serving vs Batch Inference: the Same Generation for Different Use Cases
 
-In this lesson we run the 1.2 generation again, this time as a batch Job, store the output in Object Storage, and learn when to choose an Endpoint or a Job. You're done when the Job is COMPLETED, its asset is in your bucket, and you can say whether it matches the 1.2 asset and why.
+<!-- Draft v7, 2026-11-13: patterns, then the task, then one worker (code/batch_inference.py: six steps, the clip from Wan2.2 image-to-video, so an H100) run as a Job or in a DevLab. Sizing, Endpoint comparison, video Job and scenarios removed; what's left for Modules 2-4 is one closing section. Not run on a GPU yet: [measure] values come from the author run; [verify] items are checked on the first run. -->
 
-## Serving or batch
+Say Santa wants a personalized animated gift card for each of the 200,000 children on his list: an illustrated card with a wish, animated into a short clip with a spoken greeting and music. Nobody waits for any single card; all of them have to be ready before the holidays. That's a different way of running a model from a chat agent, where a person waits for one image. Keeping a model loaded to answer requests one by one is **serving**. Running a model over a whole dataset and stopping when it's done is **batch inference**. In this lesson we compare the two patterns, then build Santa's pipeline as a batch: one Job on one H100 GPU makes the cards for ten kids, step by step, and writes them to a storage bucket. Then we raise it to 200.
 
-In Lesson 1.2 we used a warm HTTP **Endpoint** to generate Emma's telescope illustration. That works well when a user or an interactive agent is waiting for an answer right now.
-
-What if you have 200 holiday cards to generate overnight, or you want a finite GPU run that writes its outputs to a bucket and shuts itself down automatically? Leaving an Endpoint running when no requests are arriving wastes GPU budget, while a **Serverless GPU Job** starts a container, executes a script to completion, and stops billing the moment the process exits.
+<!-- visual: id=V1 | teaches=serving answers a waiting request; batch inference works through a dataset and stops | shape=flow | must-be-accurate=who waits, where results go, when the model stops | claims=M1-383 -->
 
 ```mermaid
 flowchart LR
-  Config["generation.json\n(Same prompt, seed=7, 1024x1024)"] --> Serving["Endpoint (Serving)\nWarm HTTP Server on L40S"]
-  Config --> Batch["Job (Batch)\nFinite Container Run on L40S"]
-  Serving -->|"POST /v1/images/generations"| Client["Caller receives base64 PNG\n(Billed while RUNNING, idle or not)"]
-  Batch -->|"python generate.py --n 3"| Bucket["Writes PNGs + metrics.json to Object Storage\n(Exits & stops billing on COMPLETED)"]
-  Client --> Compare["Compare Assets, Hashes & Metadata"]
-  Bucket --> Compare
+    subgraph S["Serving: a request waits"]
+        direction LR
+        user["User or agent"] -- "1 request" --> server["Model server<br/>loaded, waiting for requests"]
+        server -- "1 asset" --> user
+    end
+    subgraph B["Batch inference: a dataset waits"]
+        direction LR
+        data[("Records")] --> worker["Worker<br/>start → load model → generate all → stop"]
+        worker --> store[("Storage<br/>assets + metrics")]
+    end
 ```
 
-| Dimension | Endpoint (Serving) | Job (Batch) |
-|---|---|---|
-| **What starts the work?** | An HTTP request to a running server | Submitting a container command (`nebius ai job create`) |
-| **Model load overhead** | Paid once when the Endpoint starts | Paid once per Job container (`load_s`), amortized over `--n` assets |
-| **Where do outputs go?** | Returned in the HTTP response (`b64_json`) | Written directly to mounted Object Storage (`/outputs`) |
-| **When does billing stop?** | Only when you explicitly stop or delete the Endpoint | Automatically when the container exits (`COMPLETED` / `FAILED`) |
-| **Best use case** | Interactive apps and low-latency agent tool calls | Scheduled batches, dataset generation, and finite backfills |
+*Conceptual.*
 
-## The same generation as a Job
+How long the image step takes each way, on one GPU, with Sana at 512×512 and 20 steps:
 
-In Lesson 1.2 we ran our generation cells inside a Jupyter notebook. A Serverless Job needs a standalone Python script, not a notebook, so we extract the model loading and generation loop into [code/generate.py](code/generate.py).
+| Images | Serving: one request at a time | Batch inference: one worker, model loaded once |
+| --- | --- | --- |
+| 1 | 1.21 s, network included | 0.6 s, no network |
+| 10 | 12 s | 6 s |
+| 200 | 4 min | 2 min |
+| 200,000 | 67 h | 33 h |
 
-First, `load_pipeline(cfg)` loads the pinned Sana checkpoint onto the GPU with the exact same `fp16` / `bfloat16` recipe we used in 1.2:
+Estimates of generation time only `[calc: images × the time for one image]`. Serving: one request from a laptop to a served model `[measured: 2026-11-13, L40S]`. <!-- c:M1-377 --> Batch: the model called in our own process, in a notebook on a GPU `[measured: date and GPU to confirm]`; <!-- c:M1-386 --> a batch run should be close to it: `[measure: batch run]`. Both also pay startup and model load once: `[measure]`. The two numbers come from different runs, so read the gap as an estimate of the overhead per request (network, packing the image into the response), not as a benchmark.
 
-```python
-def load_pipeline(cfg):
-    import torch
-    from diffusers import SanaPipeline
+You're done when:
 
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA unavailable; select a GPU runtime with CUDA-enabled PyTorch")
-    pipe = SanaPipeline.from_pretrained(
-        cfg["model"],
-        revision=cfg["model_revision"],
-        variant=cfg["variant"],
-        torch_dtype=torch.float16,
-    ).to("cuda")
-    pipe.text_encoder.to(torch.bfloat16)
-    pipe.vae.to(torch.bfloat16)
-    pipe.set_progress_bar_config(disable=True)
-    return pipe
+- your Job is `COMPLETED` and stopped by itself;
+- every kid in the run has a folder in your bucket with the card (`card.png`) and the animated card (`card.mp4`), and you've watched Emma's;
+- nothing you created is still `RUNNING`.
+
+Time and cost: `[measure]` with the prebuilt worker image. The Job runs on an H100 and starts by downloading about 126 GB of video-model weights, so it is the most expensive run of this module: `[measure]` for ten kids on a preemptible H100. Rates: [Nebius pricing](https://docs.nebius.com/compute/resources/pricing).
+
+## Serving vs batch inference
+
+| | Serving | Batch inference |
+| --- | --- | --- |
+| Also called | Online or real-time inference | Offline inference, batch prediction |
+| What starts the work | A request arrives | A dataset is ready |
+| Who waits | A person or an agent, for every result | Nobody, for any single result |
+| What you tune | Time per request | Assets per hour and cost per asset |
+| The model is loaded | All the time, waiting between requests | For the run only |
+| Where results go | Back in the response | To storage |
+| How it scales | More copies of the server behind one URL | The dataset split across more workers |
+| Typical use | Chat agent, editor, live preview | Campaign, catalogue, dataset, evaluation run |
+
+AWS describes the same split: real-time inference is "ideal for online inferences that have low latency or high throughput requirements" and runs on a persistent endpoint; batch is "suitable for offline processing when large amounts of data are available upfront and you don't need a persistent endpoint". [Inference options in Amazon SageMaker AI](https://docs.aws.amazon.com/sagemaker/latest/dg/deploy-model-options.html) <!-- c:M1-383 --> Latency is the dividing line: "with batch prediction, you don't need to worry about the inference latency. With online prediction, however, inference latency is crucial." [Chip Huyen](https://huyenchip.com/2022/01/02/real-time-machine-learning-challenges-and-solutions.html) <!-- c:M1-384 -->
+
+## The task: Help Santa to Create Christmas Gift Cards
+
+The task comes from the [Santa Scale Challenge](https://github.com/mnrozhkov/santa-scale-challenge), a reference project for making personalized gift cards at scale. The story: Santa writes every child a card. He reads the child's profile, picks a gift from the wishlist and writes a short wish that ends with "Merry Christmas!". The card gets an illustration of the gift, and then it's animated: the camera drifts slowly, snow falls, lights twinkle, and a short piece of music plays under it. One child, one animated card.
+
+A record is one child: a name, an age and a wishlist.
+
+```text
+id,name,age,wishlist
+k01,Emma,7,a telescope
+k02,Lucas,5,a wooden train set
+k03,Noah,9,a robot kit
 ```
 
-Next, `run()` loads the pipeline once, measures `load_s`, loops `n` times with the configured `seed`, records each generation's latency and peak VRAM (`peak_vram_gb`), and saves `asset-000.png`..`asset-002.png` along with `metrics.json` and `trace.jsonl`:
+The list is [assets/kids.csv](assets/kids.csv): 200 kids, Emma first.
 
-```python
-torch.cuda.reset_peak_memory_stats()
-torch.cuda.synchronize()
-start = time.perf_counter()
-pipe = load_pipeline(cfg)
-torch.cuda.synchronize()
-m["load_s"] = round(time.perf_counter() - start, 4)
+We build it as a deterministic pipeline: every kid goes through the same steps in the same order. Nothing decides, judges or retries along the way; that's what an agent adds, in Module 2. [code/batch_inference.py](code/batch_inference.py) has one function per step:
 
-for index in range(n):
-    path = folder / f"asset-{index:03d}.png"
-    torch.cuda.synchronize()
-    start = time.perf_counter()
-    image = pipe(
-        prompt=cfg["prompt"],
-        **cfg["params"],
-        generator=torch.Generator(device="cuda").manual_seed(cfg["seed"]),
-    ).images[0]
-    torch.cuda.synchronize()
-    m["latency_s"].append(round(time.perf_counter() - start, 4))
-    peak_bytes = torch.cuda.max_memory_allocated()
-    m["env"]["peak_allocated_bytes"] = peak_bytes
-    m["env"]["peak_vram_gb"] = round(peak_bytes / 1e9, 3)
-    image.save(path)
-    m["assets"].append(asset_record(path))
+| Step | Reads | Makes for Emma | Runs on |
+| --- | --- | --- | --- |
+| 1. Text | The profile | Gifts, a wish that ends with "Merry Christmas!", a mood for the music, a greeting to speak | A template, or an LLM if you set a Token Factory key |
+| 2. Illustration | The first gift | A picture of the gift on snow under a starry sky. No people and no text: it gets animated later | GPU: Sana |
+| 3. Card | The illustration, the name, the wish | A 1024×1400 card, `card.png` | CPU: Pillow |
+| 4. Clip | The illustration | About 5 seconds of slow camera drift, falling snow and twinkling lights | GPU: Wan2.2-I2V-A14B, image-to-video |
+| 5. Greeting | The greeting text | "Merry Christmas, Emma! Santa heard you wished for a telescope." as speech | GPU: Kokoro-82M |
+| 6. Mix | The clip, the greeting, a music track | The animated card with sound, `card.mp4` | CPU: ffmpeg |
+
+`[placeholder: Emma's card.png and card.mp4 from the author run]`
+
+One card is a notebook exercise. The challenge is the list: N kids, and nobody waits for a single card. So the pipeline works step by step, not card by card:
+
+<!-- visual: id=V10 | teaches=one Job on one GPU runs the six steps in order; each step makes N assets, saves them to the bucket, and the next step reads them from there | shape=flow | must-be-accurate=step order, model per step, file each step writes | claims=M1-199 M1-081 M1-390 -->
+
+```mermaid
+flowchart LR
+    rec[("kids.csv<br/>N kids: 10 to 200")]
+    subgraph job["One Job, one GPU: the steps run one after another"]
+        txt["1 · Text<br/>template or LLM"]
+        img["2 · Illustration<br/>Sana"]
+        crd["3 · Card<br/>Pillow, CPU"]
+        vid["4 · Clip<br/>Wan2.2 I2V"]
+        spk["5 · Greeting<br/>Kokoro-82M"]
+        mix["6 · Mix<br/>ffmpeg, CPU"]
+    end
+    subgraph s3["S3 bucket: cards/‹kid id›/"]
+        fj[("card.json")]
+        fi[("illustration.png")]
+        fc[("card.png")]
+        fv[("clip.mp4")]
+        fg[("greeting.wav")]
+        fm[("card.mp4")]
+    end
+    rec --> txt --> fj
+    fj --> img --> fi
+    fi --> crd --> fc
+    fi --> vid --> fv
+    fj --> spk --> fg
+    fv --> mix
+    fg --> mix
+    mix --> fm
 ```
 
-Notice that `generate.py` loads the model **once** and generates `--n 3` images inside the same process. If we submitted 3 separate Jobs for 3 images, we would pay container startup and model load 3 times instead of once.
+*Conceptual. Each step makes its file for all N kids before the next step starts.*
 
-For the Endpoint side, [code/call_endpoint.py](code/call_endpoint.py) reads the same [code/generation.json](code/generation.json) file and calls `ImageGenerator` 3 times so both surfaces produce the exact same output structure (`asset-000.png`..`asset-002.png`, `metrics.json`, and `trace.jsonl`).
+Each step works through all N kids before the next one starts: it loads its model once, makes N assets and saves each one to the kid's folder in the S3 bucket. The next step reads its inputs from that folder. Steps hand over only through the bucket, so a step can be rerun or moved to another machine without touching the others.
 
-## Job lifecycle
+**The limitation in this lesson:** all six steps run inside one Job (a single run that starts, does the work and stops) on one GPU, one after another. Even the card and mix steps, which need no GPU, run on the GPU machine. It's the simplest setup that works, and it wastes time in ways we can name: the GPU waits during the CPU steps, steps that don't depend on each other can't run at the same time, and the GPU has to fit the largest model: the video model needs an H100, so the small models run on an H100 too. Running steps in parallel, giving each step its own hardware and splitting the N kids across workers are optimization and scaling: Module 3. So is surviving an interruption: if this Job is preempted, you run it again from the start.
 
-To run `generate.py` as a Serverless Job, build and push [code/Dockerfile](code/Dockerfile) for `linux/amd64` to your Nebius Container Registry (see [Container Registry quickstart](https://docs.nebius.com/container-registry/quickstart)):
+## Pick the tool: Endpoint or Job?
+
+On Nebius Serverless AI each pattern has a tool built for it. An **Endpoint** is a long-running container that serves HTTP requests at a URL: serving. A **Job** starts, runs a script to completion, writes the results to storage and stops billing: batch inference. <!-- c:M1-308 -->
+
+| | Endpoint | Job |
+| --- | --- | --- |
+| Pattern | Serving | Batch inference |
+| What starts the work | An HTTP request | Creating the Job |
+| Where outputs go | The HTTP response | A mounted bucket |
+| When it stops billing | When you stop it: it bills while `RUNNING`, idle or not <!-- c:M1-291 c:M1-193 --> | By itself, at the end of the run <!-- c:M1-290 --> |
+| Scaling | None: one VM, no scale-up under load, no scale-to-zero when idle <!-- c:M1-307 --> | One run per Job; more work = more Jobs (Module 3) |
+| Best for | Someone waiting for the answer | A batch nobody waits for |
+
+[Serverless AI overview](https://docs.nebius.com/serverless/overview) <!-- c:M1-308 -->
+
+The pattern doesn't force the tool. You can run a batch through an Endpoint: a client loops over the list and sends one request per image. The difference is in how the two tools behave over a long run:
+
+- **Endpoint:** for 200,000 images the client sends 200,000 requests, receives 200,000 responses and stays online for the whole run, about 67 hours at 1.21 s per request `[calc: 200,000 × 1.21 s]`. The Endpoint bills until you stop it. <!-- c:M1-377 c:M1-291 -->
+- **Job:** no client. The worker generates the images, writes them to the bucket, and the Job ends by itself. <!-- c:M1-290 -->
+
+So we run Santa's pipeline as a Job.
+
+## Before you start
+
+You need the Nebius CLI, an Object Storage bucket, and an S3 access key to look at the results from your laptop. Do this once.
+
+1. Install and log in to the [Nebius CLI](https://docs.nebius.com/cli/install).
+2. Create a bucket: `nebius storage bucket create --name <your-bucket>`. [Buckets](https://docs.nebius.com/object-storage/buckets/manage) <!-- c:M1-310 -->
+3. Create an access key for a service account and configure the AWS CLI with it, following the [Object Storage quickstart](https://docs.nebius.com/object-storage/quickstart). The endpoint is `https://storage.<region>.nebius.cloud`, for example `https://storage.eu-north1.nebius.cloud`. <!-- c:M1-311 c:M1-312 -->
+4. Set three variables in your shell:
 
 ```bash
-export WORKER_TAG="cr.<region>.nebius.cloud/<your-registry-id>/sana-worker:module1"
-docker buildx build --platform linux/amd64 \
-  -t "$WORKER_TAG" --push \
-  01-consistent-media-generation-on-serverless-gpus/code
-
-docker buildx imagetools inspect "$WORKER_TAG"
-export WORKER_IMAGE="cr.<region>.nebius.cloud/<your-registry-id>/sana-worker@sha256:<your-digest>"
+export WORKER_IMAGE=<course santa worker>   # [placeholder: published reference]
+export BUCKET=<your-bucket>
+export RUN_ID=job-001
 ```
 
-Every Job moves through a finite state machine from submission to a terminal state:
+## The worker
+
+[code/batch_inference.py](code/batch_inference.py) is what runs inside the Job: the whole pipeline from the task. `run()` goes through the six steps for the first `--n` kids and writes everything under `--out`:
+
+```text
+<out>/cards/k01/card.json          1. text
+                illustration.png   2. Sana
+                card.png           3. Pillow
+                clip.mp4           4. Wan2.2
+                greeting.wav       5. Kokoro
+                card.mp4           6. ffmpeg
+<out>/cards/k02/...
+```
+
+For each step it loads the model **once**, makes that step's file for every kid, frees the GPU and moves on. Loading once and generating many is the point of a batch: ten separate Jobs for ten kids would pay startup and every model load ten times.
+
+Three things to know before you run it:
+
+- **Every file is written once and never changed.** That's what lets `--out` be a bucket mounted into the container: the script saves files to a folder, and they are objects in S3. No upload code. `[verify on first run: MP4 and WAV writers on the bucket mount]`
+- **The clip step decides the GPU.** Wan2.2 image-to-video is the largest model in the pipeline: it needs an H100 and about 126 GB of weights, downloaded when the step starts. <!-- c:M1-063 c:M1-328 c:M1-390 --> `--step text --step illustration --step card --step greeting` leaves it out; that part fits an L40S.
+- **The text step uses a fixed template** unless `TOKEN_FACTORY_API_KEY` is set; then an LLM writes the gifts and the wish. The music is one track from the module's shared media, [assets/4_jingle.mp3](assets/4_jingle.mp3); add `<mood>.mp3` files next to it to get a track per mood.
+
+It logs a line for every model load and every finished asset, so the Job's logs show where it is. `--help` lists the options: `--n`, `--out` and `--step`.
+
+The worker image is built from [code/docker/Dockerfile](code/docker/Dockerfile), the one lesson 03 walks through, with this module's folder as the build context: the scripts come from `code/`, the kids list, the fonts and the music from `assets/`. Weights, secrets and outputs stay out; the module's [.dockerignore](.dockerignore) lets nothing else in.
+
+## Run the Job
+
+There are two ways to run the worker, and both end with the results in your S3 bucket:
+
+| | Path A: a Job, submitted from your laptop | Path B: the notebook and the script, in a DevLab |
+| --- | --- | --- |
+| What you run | `nebius ai job create`, in a terminal or a notebook cell | [code/nb-santa-cards.ipynb](code/nb-santa-cards.ipynb) cell by cell, then `python code/batch_inference.py` in the DevLab's terminal |
+| Where the script runs | In a container on a GPU VM that Nebius starts for the Job | In your DevLab's Python environment |
+| How results reach S3 | The script writes to the bucket mounted at `/outputs` | The same: the bucket is mounted into the DevLab |
+| When the GPU stops billing | When the Job ends <!-- c:M1-290 --> | When you stop or delete the DevLab; its disk bills until you delete it <!-- c:M1-207 --> |
+| Price | Preemptible or regular, your choice | Regular only: a DevLab can't be preemptible <!-- c:M1-207 --> |
+| Use it for | The batch run | Developing and debugging the worker before it goes into a Job |
+
+Start with path B if you want to see and hear each step before paying for a whole batch; path A is the batch run.
+
+### Path A: a Job from your laptop
+
+**Pick the price.** The pipeline needs an H100 for the clip step. You choose how to pay for it:
+
+| | Set | Price |
+| --- | --- | --- |
+| H100, preemptible (the command below) | nothing | A spot price that changes during the day and can go above the regular price <!-- c:M1-088 --> |
+| H100, regular | replace `--preemptible --follows-spot-price` with `--on-demand` | The regular price; the GPU isn't taken back |
+
+Check [today's spot price](https://docs.nebius.com/signup-billing/spot-prices) and the [pricing page](https://docs.nebius.com/compute/resources/pricing) first. We prefer a preemptible H100 when its spot price is low and one is available; if the Job can't get one, use the regular price.
+
+One command creates the Job. Check the request first: `--dry-run` validates it without creating anything.
+
+```bash
+nebius ai job create --dry-run --name "$RUN_ID" --image "$WORKER_IMAGE" \
+  --platform gpu-h100-sxm --preset 1gpu-16vcpu-200gb \
+  --preemptible --follows-spot-price \
+  --timeout 2h --restart-policy never \
+  --volume "$BUCKET:/outputs:rw" \
+  --container-command bash --args "-c 'python /app/batch_inference.py --n 10 --out /outputs/runs/01-consistent-media-generation-on-serverless-gpus/$RUN_ID'"
+```
+
+- **`--volume "$BUCKET:/outputs:rw"`** mounts your bucket into the container at `/outputs`. Whatever the script saves under `/outputs` is in S3. <!-- c:M1-281 c:M1-282 -->
+- **Preemptible by default.** Jobs run on a regular VM unless you ask for preemptible; preemptible is cheaper, and Nebius can take the GPU back. If that happens the Job ends in `ERROR` and isn't retried: run it again. [Jobs: manage](https://docs.nebius.com/serverless/jobs/manage), [auto-restarts](https://docs.nebius.com/serverless/jobs/auto-restarts) <!-- c:M1-295 c:M1-296 -->
+- **`--timeout 2h`** is the hard stop if anything hangs; the shortest allowed is `1h`. <!-- c:M1-293 --> The first thing the clip step does is download about 126 GB of weights onto the Job's disk (250 GiB by default), so leave room. <!-- c:M1-063 c:M1-301 --> Downloading on every run is wasteful on purpose here; Module 3 fixes it. `--timeout 4h` raises the limit for a longer run.
+- **`--restart-policy never`**: a failed run fails once, it doesn't loop. <!-- c:M1-294 -->
+- **`--platform` and `--preset` always**, so you know which GPU you pay for. <!-- c:M1-301 -->
+
+`[verify on first run: --volume by bucket name, and the --args quoting]`
+
+Then run the same command without `--dry-run`. It prints the Job's ID.
+
+Ten kids is the default. For a larger batch in the same Job, change `--n 10` to `--n 200` (the most in this lesson) and `--timeout 2h` to `--timeout 4h`, with a new `RUN_ID`, for example `job-200`.
+
+The models load once per Job, however long the list is: the fixed part of the run stays the same, and only the per-card part grows `[measure]`. The clips are most of it: at the 40.66 s per clip we measured for this model through an Endpoint, 200 clips are about 2.3 hours of H100 time `[calc: 200 × 40.66 s; one request from a laptop, 2026-11-13]`, so decide on 200 after you have seen what ten cost. <!-- c:M1-382 -->
+
+To let an LLM write the text, add `--env-secret TOKEN_FACTORY_API_KEY=<your secret>` at the end of any of these commands `[verify]`; without it the template is used. <!-- c:M1-292 -->
+
+**From a notebook.** The same command works in a Jupyter cell on your laptop: set the variables with `%env WORKER_IMAGE=...`, `%env BUCKET=...`, `%env RUN_ID=...`, and put `!` in front of `nebius ai job create`. `[verify on first run]`
+
+### Path B: the notebook and the script in a DevLab
+
+A DevLab is JupyterLab on a GPU VM. Here nothing is submitted: you call the pipeline's functions yourself, look at each result, and only then run the script. `[verify on first run: the commands in this path haven't been executed yet]`
+
+1. Create a DevLab on an H100 with your bucket mounted at `/outputs`, the same way the Job has it. A DevLab bills at the regular price for as long as it runs, so plan the session. On an L40S (`--platform gpu-l40s-a --preset 1gpu-8vcpu-32gb`) you can do everything except the clip and the mix:
+
+   ```bash
+   nebius ai devlab create --name santa-dev --template jupyter \
+     --platform gpu-h100-sxm --preset 1gpu-16vcpu-200gb \
+     --volume "$BUCKET:/outputs:rw"
+   ```
+
+   `[verify on first run: --volume with a bucket name on a DevLab; the s3:// form needs a secret]` [`nebius ai devlab create`](https://docs.nebius.com/cli/reference/ai/devlab/create) <!-- c:M1-392 -->
+
+2. Open the DevLab's URL, open a **Terminal**, and prepare the environment once per DevLab. The template already has this repo and `uv`:
+
+   ```bash
+   cd ~/work/production-ai-agents-for-media-generation
+   git pull
+   uv sync --extra gpu --extra notebooks
+   uv pip install "kokoro>=0.9.2" ftfy imageio imageio-ffmpeg
+   sudo apt-get install -y espeak-ng
+   uv run python -m ipykernel install --user --name course-gpu --display-name "course (GPU)"
+   ```
+
+3. Open [code/nb-santa-cards.ipynb](code/nb-santa-cards.ipynb), choose the **course (GPU)** kernel and run it top to bottom. It makes Emma's card one step at a time and shows the text, the illustration, the card, the clip, the greeting and the final video. Its last cell runs the batch for three kids.
+
+4. Run the script, the same way a Job will, with the output on the bucket mount:
+
+   ```bash
+   cd 01-consistent-media-generation-on-serverless-gpus
+   uv run --no-sync python code/batch_inference.py --n 10 \
+     --out /outputs/runs/01-consistent-media-generation-on-serverless-gpus/devlab-001
+   ```
+
+   It prints a line per asset and the path of the `cards` folder at the end. The files are in your bucket as soon as they are written: no upload step.
+
+5. Delete the DevLab when you're done. It bills its GPU while it runs, including while you read and type, and a stopped DevLab still bills its disk. <!-- c:M1-207 -->
+
+## Watch it
+
+For a Job (path A):
+
+```bash
+nebius ai job get <job_ID>
+nebius ai job logs <job_ID> --follow
+```
+
+<!-- c:M1-298 -->
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PROVISIONING: nebius ai job create
-    PROVISIONING --> IMAGE_PULLING: GPU node allocated
-    IMAGE_PULLING --> RUNNING: Container image unpacked
-    RUNNING --> COMPLETED: python generate.py exits 0
-    RUNNING --> FAILED: Non-zero exit or OOM
-    PROVISIONING --> CANCELLED: Operator cancels
-    RUNNING --> CANCELLED: Operator cancels or --timeout reached
+    [*] --> PROVISIONING
+    PROVISIONING --> STARTING
+    STARTING --> IMAGE_PULLING
+    IMAGE_PULLING --> RUNNING
+    RUNNING --> COMPLETED
+    RUNNING --> FAILED
+    RUNNING --> ERROR: e.g. preempted
     COMPLETED --> [*]
 ```
 
-## Store Job outputs in Object Storage
+*Conceptual; state names from the [lifecycle docs](https://docs.nebius.com/serverless/lifecycle).* <!-- c:M1-287 -->
 
-Because a Job's local container disk disappears when the Job finishes, we mount an S3-compatible Object Storage bucket at `/outputs`:
-
-1. Create a private bucket in your project following the [Object Storage quickstart](https://docs.nebius.com/object-storage/quickstart).
-2. Configure a service-account access key in your local AWS CLI `default` profile ([AWS CLI setup guide](https://docs.nebius.com/object-storage/interfaces/aws-cli)) so the Nebius CLI can attach the bucket volume.
-
-Validate the request with `--dry-run` first, then run `nebius ai job create` without `--dry-run` to launch the Job on `gpu-l40s-a`:
-
-```bash
-export BUCKET="<your-bucket-name>"
-export RUN_ID="emma-$(date -u +%Y%m%dT%H%M%SZ)"
-
-nebius ai job create \
-  --name "m1-${RUN_ID}" \
-  --image "$WORKER_IMAGE" \
-  --platform gpu-l40s-a \
-  --preset 1gpu-8vcpu-32gb \
-  --on-demand \
-  --timeout 1h \
-  --restart-policy never \
-  --volume "s3://${BUCKET}:/outputs:rw" \
-  --env "WORKER_IMAGE=${WORKER_IMAGE}" \
-  --env GPU_PRESET=1gpu-8vcpu-32gb \
-  --container-command python \
-  --args "/app/generate.py --config /app/generation.json --n 3 --out /outputs/runs/01-consistent-media-generation-on-serverless-gpus/${RUN_ID}" \
-  --dry-run
-```
-
-Once the `--dry-run` output looks right, re-run the command without `--dry-run`, copy the Job ID from the response, and watch its progress and logs:
-
-```bash
-nebius ai job get "$JOB_ID"
-nebius ai logs "$JOB_ID"
-```
-
-When the Job reaches `COMPLETED`, verify that the files actually landed in your bucket under `runs/01-consistent-media-generation-on-serverless-gpus/${RUN_ID}/`:
+The logs show the script's progress: one line when a model has loaded, one for every finished asset `[measure: times from the author run]`:
 
 ```text
-runs/01-consistent-media-generation-on-serverless-gpus/<RUN_ID>/
-├── asset-000.png
-├── asset-001.png
-├── asset-002.png
-├── metrics.json
-└── trace.jsonl
+12:00:01 10 kids, steps: text, illustration, card, clip, greeting, mix, out: /outputs/runs/.../job-001/cards
+12:00:01 text: written by the template
+12:00:01 text 1/10 k01 0.0 s
+...
+12:00:… illustration model loaded in … s
+12:00:… illustration 1/10 k01 … s
+...
+12:…:… clip model loaded in … s
+12:…:… clip 1/10 k01 … s
+...
+12:…:… mix 10/10 k10 … s
+12:…:… finished: /outputs/runs/.../job-001/cards
 ```
 
-Download `asset-000.png` and `metrics.json` from the bucket and check that `status` is `"completed"` and the SHA-256 hash in `metrics.json` matches the downloaded file. Never trust a `COMPLETED` status without checking that the output files are non-empty in storage.
+## See the results in the bucket
 
-## Compare the Job asset with the Endpoint asset
+The script wrote everything to your bucket, and the files stay there after the Job's VM is deleted. <!-- c:M1-290 --> List them:
 
-Now open `metrics.json` from your 1.2 Endpoint run and `metrics.json` from your 1.4 Job run side by side:
+```bash
+aws s3 ls --recursive s3://$BUCKET/runs/01-consistent-media-generation-on-serverless-gpus/$RUN_ID/ \
+  --endpoint-url https://storage.eu-north1.nebius.cloud
+```
 
-| Field in `metrics.json` | Endpoint Run (`call_endpoint.py`) | Job Run (`generate.py`) |
-|---|---|---|
-| `config.prompt`, `seed`, `params` | Identical (`seed: 7`, `1024x1024`, `20` steps) | Identical (`seed: 7`, `1024x1024`, `20` steps) |
-| `config.model_revision` | `null` (`requested_model_revision` recorded separately because the stock Endpoint API does not report its resolved Hub commit) | `"ac0da2ff55fbe434795be0dce883042e4d49e2fc"` (strictly pinned in `SanaPipeline.from_pretrained`) |
-| `env.gpu`, `torch`, `diffusers` | `null` from the HTTP client | `"NVIDIA L40S"`, `"2.13.0"`, `"0.39.0"`, `peak_vram_gb: 10.908` |
-| Within-run asset hashes (`asset-000`..`002`) | Identical across the 3 requests (`seed=7`) | Identical across the 3 generations (`seed=7`) |
+You should see six files for every kid: `cards/k01/card.json`, `illustration.png`, `card.png`, `clip.mp4`, `greeting.wav` and `card.mp4` `[verify on first run]`. Get Emma's animated card and play it:
 
-Compare the visual images and the SHA-256 hashes between the Endpoint and the Job:
+```bash
+aws s3 cp s3://$BUCKET/runs/01-consistent-media-generation-on-serverless-gpus/$RUN_ID/cards/k01/card.mp4 emma.mp4 \
+  --endpoint-url https://storage.eu-north1.nebius.cloud
+```
 
-- Within the **same** Job container (or across two Jobs using the exact same `WORKER_IMAGE` digest and GPU), `seed=7` produces the exact same SHA-256 hash every time (`c4c30814...`).
-- Between the **Endpoint** and the **Job**, if the SHA-256 hashes match, both containers resolved the same checkpoint and runtime stack; if they differ slightly, `metrics.json` shows you exactly why (such as an updated checkpoint commit on the unpinned template Endpoint or a different container image build).
+`[placeholder: Emma's card from the author run]`
+
+## Optional: download the media
+
+To look at all the cards, download the two finished files per kid, the card and the animated card:
+
+```bash
+aws s3 cp --recursive \
+  s3://$BUCKET/runs/01-consistent-media-generation-on-serverless-gpus/$RUN_ID \
+  runs/01-consistent-media-generation-on-serverless-gpus/$RUN_ID \
+  --exclude "*" --include "*/card.png" --include "*/card.mp4" \
+  --endpoint-url https://storage.eu-north1.nebius.cloud
+```
+
+Leave out the `--exclude` and `--include` flags to get every intermediate file too. Downloading to your laptop is internet egress; reading from the bucket inside the same region is free. [Object Storage pricing](https://docs.nebius.com/object-storage/resources/pricing) <!-- c:M1-321 -->
+
+## Clean up
+
+A Job stops by itself; a DevLab doesn't, so delete it if you used path B. Then delete what's left in the bucket, once for each `RUN_ID` you created (`job-001`, `job-200`, `devlab-001`):
+
+```bash
+aws s3 rm --recursive s3://$BUCKET/runs/01-consistent-media-generation-on-serverless-gpus/$RUN_ID \
+  --endpoint-url https://storage.eu-north1.nebius.cloud
+```
+
+Check that nothing is still `RUNNING`:
+
+```bash
+nebius ai job list
+nebius ai endpoint list
+nebius ai devlab list
+```
+
+<!-- c:M1-299 c:M1-315 -->
+
+## Common failures and recovery
+
+| You see | Why | Fix |
+| --- | --- | --- |
+| `QuotaExceeded` at create | Default quotas are small on new accounts <!-- c:M1-302 c:M1-094 --> | Use one GPU; check your quotas |
+| Stuck in `PROVISIONING`, then `ERROR` with `NotEnoughResources` | No capacity; Serverless keeps trying for up to 30 minutes <!-- c:M1-306 --> | `--on-demand`, another region, or later |
+| `ERROR` after running a while | Preempted <!-- c:M1-296 --> | Run the Job again |
+| `--timeout` rejected | Below the 1h minimum <!-- c:M1-293 --> | Use `1h` or more |
+| `FAILED` right after `IMAGE_PULLING` | Wrong architecture or a private image <!-- c:M1-258 c:M1-314 --> | `linux/amd64`; a public image or your project's registry |
+| `COMPLETED` but the bucket is empty | Output written outside `/outputs` | Check `--out` and the `--volume` mount |
+| `CUDA out of memory` in the clip step | The video model on a GPU smaller than an H100 <!-- c:M1-328 --> | Use an H100; on an L40S run `--step text --step illustration --step card --step greeting` |
+| The Job ends before the cards are done | The weights download and the clips took longer than `--timeout` | Raise `--timeout` |
 
 ## What bills
 
-Understanding what accrues charges on each resource keeps your course credits safe ([Serverless AI pricing](https://docs.nebius.com/serverless/pricing-quotas)):
+| Resource | Billed while |
+| --- | --- |
+| Job | Running; the VM is deleted at the end <!-- c:M1-290 --> |
+| DevLab | Running, at the regular price; its disk until you delete it <!-- c:M1-207 --> |
+| Endpoint | `RUNNING`, idle or not; nothing while stopped <!-- c:M1-291 --> |
+| Bucket | Stored data, all the time; egress to the internet <!-- c:M1-320 c:M1-321 --> |
+| Container Registry | Free <!-- c:M1-319 --> |
 
-| Resource | When Compute Bills | When Stopped / Completed | What to Watch Out For |
-|---|---|---|---|
-| **Serverless Endpoint** | Every second while status is `RUNNING` (`$1.5484/h` on-demand L40S), **including idle time** | `$0/h` once stopped or deleted | An idle L40S Endpoint left `RUNNING` for 12 hours burns `~$18.58`. Always stop/delete when done. |
-| **Serverless Job** | Every second from container start until `COMPLETED`, `FAILED`, or `CANCELLED` | `$0/h` automatically on terminal state | `--restart-policy` defaults to no restarts in our script so a failing script does not loop and bill repeatedly. |
-| **GPU DevLab (Option B)** | Every second while the DevLab VM is running | Compute stops when stopped, but attached workspace disk continues to bill until deleted | Delete the DevLab once you have downloaded your outputs. |
-| **Object Storage Bucket** | Storage volume (`~$0.0147/GiB-month` Standard) | Bills while objects remain in the bucket | A few 2 MB PNGs cost fractions of a cent per month (`~$0.000024/month` per PNG). |
+Rates: [Nebius pricing](https://docs.nebius.com/compute/resources/pricing), [Object Storage pricing](https://docs.nebius.com/object-storage/resources/pricing).
 
-## Job timeouts
+## What this lesson leaves out
 
-Every `nebius ai job create` command in this course includes two flags that protect your budget:
+One Job on one GPU is the simplest batch that works. Santa's list has 200,000 kids, and that needs more:
 
-1. `--restart-policy never`: If your Python script raises an exception, the Job fails immediately instead of restarting in a loop.
-2. `--timeout 1h` (or the shortest duration supported by your CLI version): If a weight download hangs or a process deadlocks, the platform terminates the Job automatically at the timeout boundary. If you see a Job stuck in logs earlier than that, cancel it right away with:
+| Left out here | Why it matters at 200,000 | Where we deal with it |
+| --- | --- | --- |
+| Parallel workers | One GPU makes one card after another: `[measure: time per card × 200,000]` | Module 3 |
+| Hardware per step | The CPU steps hold a GPU, and the GPU is sized for the largest model | Module 3 |
+| Weights downloaded on every run | Each Job starts by downloading about 126 GB for the video model before it makes anything, and pays GPU time for the wait <!-- c:M1-063 --> | Module 3 (keeping weights close to the GPU) |
+| Surviving an interruption | A preempted Job starts again from the first kid | Module 3 |
+| Cost and limits | You want the price before the run, and a stop when it goes over | Lesson 05, then Module 3 |
+| Checking the cards | The pipeline never looks at what it made, and nobody can look at 200,000 cards | Module 2 (a judge that retries), Module 4 (evaluation and tracing) |
 
-```bash
-nebius ai job cancel "$JOB_ID"
-```
+Next: in [lesson 05](05-measuring-costs.md) we split a run into startup, model load and generation time, and turn them into a cost per asset.
 
-## What this means for scale
+## References
 
-Look at what `generate.py` just did inside the Job: it paid the container startup (`225.17 s`) and model load (`39.89 s` cold / `12.85 s` warm) **once**, and then generated 3 images at `4.42 s` each.
-
-In Module 3 (`Batch Media Generation at Scale`), we will take this exact worker pattern and fan out 200 records across 10 parallel spot GPU Jobs — where each Job loads the model once and processes a 20-record shard.
-
-First, let's turn our startup, load, and generation timings into exact dollar figures and calculate our API breakeven in [1.5 Measuring Startup, Load and Generation Costs](05-measuring-costs.md).
+- [Serverless AI: jobs](https://docs.nebius.com/serverless/jobs/manage), Nebius
+- [Serverless AI: lifecycle](https://docs.nebius.com/serverless/lifecycle), Nebius
+- [Inference options in Amazon SageMaker AI](https://docs.aws.amazon.com/sagemaker/latest/dg/deploy-model-options.html), AWS
+- [Real-time machine learning: challenges and solutions](https://huyenchip.com/2022/01/02/real-time-machine-learning-challenges-and-solutions.html), Chip Huyen (2022)
+- [Full Stack Deep Learning 2022, Lecture 5: Deployment](https://fullstackdeeplearning.com/course/2022/lecture-5-deployment/)
+- [Santa Scale Challenge](https://github.com/mnrozhkov/santa-scale-challenge): the pipeline this lesson adapts
+- [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) and [Wan2.2-I2V-A14B](https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B-Diffusers), model cards
