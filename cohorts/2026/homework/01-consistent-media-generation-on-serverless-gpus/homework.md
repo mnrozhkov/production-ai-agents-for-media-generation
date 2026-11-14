@@ -39,10 +39,10 @@ Templates for all of them: [Serverless AI Cookbook](https://github.com/nebius/se
 
 ### Generate and measure
 
-See [1.5 Measuring Startup, Load and Generation Costs](../../../../01-consistent-media-generation-on-serverless-gpus/05-measuring-costs.md).
+See [05 - Measuring Startup, Load and Generation Costs](../../../../01-consistent-media-generation-on-serverless-gpus/05-measuring-costs.md).
 
 * Turn your creative idea into a prompt.
-* Generate the asset **at least 3 times** with the same prompt, seed and parameters. Small differences between runs can happen; see 1.2.
+* Generate the asset **at least 3 times** with the same prompt, seed and parameters. Small differences between runs can happen; see lesson 02.
 * Record, in seconds:
     * **Startup time `t_start`:** from create (Endpoint, Job or JupyterLab) until it is RUNNING
     * **Ready time `t_ready`:** Endpoint: from RUNNING until `/v1/models` returns JSON (readiness wait). Job or JupyterLab: the model load timer in your code.

@@ -59,7 +59,7 @@ An **image** is the package you build and reuse. A **container** is a running in
 flowchart TB
     subgraph image["Container image · built once, reused across runs"]
         direction TB
-        code["APPLICATION LAYER<br/>batch_inference.py · common.py · kids.csv<br/>Changes most often"]
+        code["APPLICATION LAYER<br/>batch_inference.py · common.py · models.py<br/>Changes most often"]
         libs["DEPENDENCY LAYER<br/>Diffusers · Transformers · Accelerate<br/>Pinned versions"]
         base["BASE LAYERS<br/>CUDA runtime · Python · PyTorch<br/>Base image pinned by tag and digest"]
         code ~~~ libs ~~~ base
@@ -181,7 +181,7 @@ RUN pip install diffusers transformers
 # fixed: pinned installs first, then code
 RUN pip install diffusers==0.39.0 transformers==5.13.1 
 WORKDIR /app
-COPY code/common.py code/batch_inference.py code/kids.csv /app/
+COPY code/common.py code/models.py code/batch_inference.py /app/
 ```
 
 | Bad line | What goes wrong | Fix |
@@ -229,7 +229,7 @@ ENV HF_TOKEN=NOT_A_REAL_TOKEN
 COPY . /app
 
 # fixed: no token in the Dockerfile; copy named files only
-COPY code/common.py code/batch_inference.py code/kids.csv /app/
+COPY code/common.py code/models.py code/batch_inference.py /app/
 ```
 
 | Bad line         | What goes wrong                                                                                                           | Fix                                                                         |
@@ -257,15 +257,16 @@ RUN --mount=type=secret,id=hf_token \
 docker build --secret id=hf_token,env=HF_TOKEN .
 ```
 
-**Stray files: allowlist the build context.** The image is built from this module's folder, because the worker needs files from `code/` and one from `assets/`. That folder also holds `code/.env` and your local runs. [.dockerignore](.dockerignore) lists what may enter the build: the first line `*` excludes everything, then each `!path` lets one file or folder back in. The last matching line wins. [Docker: build context](https://docs.docker.com/build/concepts/context/) 
+**Stray files: allowlist the build context.** The image is built from this module's folder, because the worker needs files from `code/` and from `assets/`. That folder also holds `code/.env` and your local runs. [.dockerignore](.dockerignore) lists what may enter the build: the first line `*` excludes everything, then each `!path` lets one file or folder back in. The last matching line wins. [Docker: build context](https://docs.docker.com/build/concepts/context/) 
 
 ```text
 *
 !code/common.py
+!code/models.py
 !code/batch_inference.py
-!code/kids.csv
-!code/fonts/
+!assets/kids.csv
 !assets/4_jingle.mp3
+!assets/fonts/
 ```
 
 `COPY . /app` here would be safe only because of this file. Don't rely on that: name the files in the Dockerfile too.
@@ -302,11 +303,11 @@ FROM pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_BREAK_SYSTEM_PACKAGES=1 HF_HOME=/cache/huggingface
 RUN apt-get update && apt-get install -y --no-install-recommends espeak-ng && rm -rf /var/lib/apt/lists/*
 RUN pip install diffusers==0.39.0 transformers==5.13.1 accelerate==1.14.0 sentencepiece==0.2.1 protobuf==6.33.0
-RUN pip install "kokoro>=0.9.2" ftfy imageio imageio-ffmpeg openai pillow
+RUN pip install "kokoro>=0.9.2" ftfy imageio imageio-ffmpeg openai pillow pydantic typer rich
 WORKDIR /app
-COPY code/common.py code/batch_inference.py code/kids.csv /app/
-COPY code/fonts /app/fonts
-COPY assets/4_jingle.mp3 /assets/4_jingle.mp3
+COPY code/common.py code/models.py code/batch_inference.py /app/
+COPY assets/kids.csv assets/4_jingle.mp3 /assets/
+COPY assets/fonts /assets/fonts
 RUN mkdir -p /cache /outputs
 CMD ["python", "/app/batch_inference.py", "--n", "1", "--out", "/outputs/run"]
 ```

@@ -1,6 +1,7 @@
 *
 !code/common.py
+!code/models.py
 !code/batch_inference.py
-!code/kids.csv
-!code/fonts/
+!assets/kids.csv
 !assets/4_jingle.mp3
+!assets/fonts/

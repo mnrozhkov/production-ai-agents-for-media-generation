@@ -1,7 +1,6 @@
 """Shared helpers for configuration, run directories, metrics, traces, and cost calculations."""
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import math
@@ -13,42 +12,27 @@ import urllib.request
 from datetime import datetime, timezone
 from getpass import getpass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-# The module's Sana settings: the model pinned to a Hub commit, and the sampling settings of lesson 02.
-SANA = {
-    "model": "Efficient-Large-Model/Sana_1600M_1024px_diffusers",
-    "model_revision": "ac0da2ff55fbe434795be0dce883042e4d49e2fc",
-    "variant": "fp16",
-    "prompt": (
-        "A centered Christmas storybook illustration of a brass telescope glowing softly on snow under a starry "
-        "night sky, surrounded by a small decorated Christmas tree, wrapped presents, twinkling lights, gentle "
-        "falling snow, warm vibrant colors, whimsical children's-book art style, no people, no text"
-    ),
-    "seed": 7,
-    "params": {"width": 512, "height": 512, "num_inference_steps": 20, "guidance_scale": 4.5, "negative_prompt": ""},
-    "image": None,
-}
+from models import SANA, ImageSpec
+
+if TYPE_CHECKING:
+    from diffusers import SanaPipeline
+
 MODULE = "01-consistent-media-generation-on-serverless-gpus"
 
 
-def positive(value):
-    number = int(value)
-    if number < 1:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return number
-
-
-def load_pipeline(cfg=SANA):
-    """Load the Sana Diffusers pipeline onto the GPU. Used by image.py (lesson 02) and batch_inference.py (lesson 04)."""
-    import torch
+def load_pipeline(spec: ImageSpec = SANA) -> SanaPipeline:
+    """Load Sana onto the GPU. Used by image.py (lesson 02) and batch_inference.py (lesson 04)."""
+    import torch  # GPU-only packages: imported where they're needed
     from diffusers import SanaPipeline
 
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA unavailable; select a GPU runtime with CUDA-enabled PyTorch")
     pipe = SanaPipeline.from_pretrained(
-        cfg["model"],
-        revision=cfg.get("model_revision"),
-        variant=cfg.get("variant", "fp16"),
+        spec.model,
+        revision=spec.model_revision,
+        variant=spec.variant,
         torch_dtype=torch.float16,
     ).to("cuda")
     # Sana recipe: fp16 transformer, bf16 text encoder and VAE to prevent black images.
@@ -131,7 +115,8 @@ def wait_ready(base, token, deadline_s=600):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError(
-                f"Readiness deadline reached (last error: {last_error}); inspect logs and stop the Endpoint"
+                f"Readiness deadline reached (last error: {last_error}); "
+                "inspect logs and stop the Endpoint"
             )
         try:
             data = request(base, token, "/v1/models", timeout=min(30, remaining))

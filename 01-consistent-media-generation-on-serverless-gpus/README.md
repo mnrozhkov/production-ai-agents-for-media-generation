@@ -79,7 +79,8 @@ One page per lesson at the module root, all code flat in `code/` (files import e
 ├── 03-containers.md
 ├── 04-serving-vs-batch.md
 ├── 05-measuring-costs.md
-├── assets/                               # media shown in the guides; the worker's music track (4_jingle.mp3)
+├── .dockerignore                         # 03, 04: what may enter the worker image build
+├── assets/                               # media for the guides; data and media the code reads: kids.csv, fonts/, 4_jingle.mp3
 └── code/
     ├── .env                              # you create it: Endpoint URL + token (notebooks write it; git-ignored)
     ├── nb-first-generation-local.ipynb   # 02: your laptop → Endpoint
@@ -88,12 +89,10 @@ One page per lesson at the module root, all code flat in `code/` (files import e
     ├── image.py                          # 02: ImageGenerator client (generate_image), comparison strip, request_id
     ├── share_card.py                     # 02: the share card image
     ├── batch_inference.py                # 03, 04: Santa's gift cards for N kids in one Job: text, illustration, card, clip, greeting, mix
-    ├── nb-santa-cards.ipynb              # 04: the same steps one at a time, on a GPU
-    ├── submit_job.sh                     # 04: run the worker as a Serverless Job that writes to your bucket
-    ├── kids.csv                          # 04: 200 kid profiles
+    ├── nb-santa-cards.ipynb              # 04: the same steps for one kid, to explore and test, on a GPU
     ├── nb-measuring-costs.ipynb          # 05: cost per asset
-    ├── common.py                         # 02–05: Sana settings and loader, setup_endpoint(), request(), wait_ready(), .env helpers, metrics writers, calculate_cost()
-    ├── fonts/                            # fonts for the card images
+    ├── models.py                         # 02, 04: model specs (Sana, Wan2.2, Kokoro, ...), pinned
+    ├── common.py                         # 02–05: Sana loader, setup_endpoint(), request(), wait_ready(), .env helpers, metrics writers, calculate_cost()
     └── docker/                           # 03, 04: Dockerfile (the worker image), Dockerfile.bad (what not to do)
 ```
 

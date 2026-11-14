@@ -73,12 +73,13 @@ class ImageGenerator:
         import torch
 
         from common import load_pipeline
+        from models import SANA
 
         torch.cuda.reset_peak_memory_stats()
         torch.cuda.synchronize()
         start = time.perf_counter()
         pipe = load_pipeline(
-            {"model": model, "model_revision": model_revision, "variant": variant}
+            SANA.with_overrides(model=model, model_revision=model_revision, variant=variant)
         )
         torch.cuda.synchronize()
         load_s = time.perf_counter() - start

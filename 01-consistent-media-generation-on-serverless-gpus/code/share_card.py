@@ -14,7 +14,7 @@ _PALE_PINK = "#FAD0FD"
 
 _SHARE_HEADLINE = "I'm going to build\na Personalized\nMedia Factory"
 
-FONT_DIR = Path(__file__).resolve().parent / "fonts"
+FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
 
 def _font(size, *, bold=False):
