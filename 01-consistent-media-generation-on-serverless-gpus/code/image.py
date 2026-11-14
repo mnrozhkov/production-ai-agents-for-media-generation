@@ -72,7 +72,7 @@ class ImageGenerator:
         """Load the Diffusers pipeline onto the local CUDA GPU once and return a ready ImageGenerator."""
         import torch
 
-        from generate import load_pipeline
+        from common import load_pipeline
 
         torch.cuda.reset_peak_memory_stats()
         torch.cuda.synchronize()

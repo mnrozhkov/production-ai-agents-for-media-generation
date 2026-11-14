@@ -69,7 +69,7 @@ Write a one-page proposal for your capstone: problem, records, two GPU media mod
 
 ## Module structure
 
-One page per lesson at the module root, all code flat in `code/` (files import each other), guide images in `images/`.
+One page per lesson at the module root, all code flat in `code/` (files import each other), media in `assets/`.
 
 ```text
 01-consistent-media-generation-on-serverless-gpus/
@@ -79,15 +79,22 @@ One page per lesson at the module root, all code flat in `code/` (files import e
 ├── 03-containers.md
 ├── 04-serving-vs-batch.md
 ├── 05-measuring-costs.md
-├── images/                         # guide images: NN-slug-MM-what.png
+├── assets/                               # media shown in the guides; the worker's music track (4_jingle.mp3)
 └── code/
-    ├── .env                        # you create it: Endpoint URL + token (notebooks write it; git-ignored)
-    ├── first_image_local.ipynb     # 02: your laptop → Endpoint
-    ├── first_image_devlab.ipynb    # 02: JupyterLab on a GPU
-    ├── image.py                    # 02: ImageGenerator client (generate_image), comparison strip, request_id
-    ├── batch_inference.py          # 04, 05: n images through an Endpoint with one config → assets, metrics.json, trace.jsonl; CLI --n 3
-    ├── common.py                   # 02–05: setup_endpoint(), request(), wait_ready(), .env helpers, config checks, metrics/trace writers, calculate_cost()
-    └── docker/                     # 03, 04: Dockerfiles
+    ├── .env                              # you create it: Endpoint URL + token (notebooks write it; git-ignored)
+    ├── nb-first-generation-local.ipynb   # 02: your laptop → Endpoint
+    ├── nb-first-generation-devlab.ipynb  # 02: JupyterLab on a GPU
+    ├── nb-emma-gift.ipynb                # follow-up to 02: Emma's card, one asset per modality, one Endpoint each
+    ├── image.py                          # 02: ImageGenerator client (generate_image), comparison strip, request_id
+    ├── share_card.py                     # 02: the share card image
+    ├── batch_inference.py                # 03, 04: Santa's gift cards for N kids in one Job: text, illustration, card, clip, greeting, mix
+    ├── nb-santa-cards.ipynb              # 04: the same steps one at a time, on a GPU
+    ├── submit_job.sh                     # 04: run the worker as a Serverless Job that writes to your bucket
+    ├── kids.csv                          # 04: 200 kid profiles
+    ├── nb-measuring-costs.ipynb          # 05: cost per asset
+    ├── common.py                         # 02–05: Sana settings and loader, setup_endpoint(), request(), wait_ready(), .env helpers, metrics writers, calculate_cost()
+    ├── fonts/                            # fonts for the card images
+    └── docker/                           # 03, 04: Dockerfile (the worker image), Dockerfile.bad (what not to do)
 ```
 
 ## Setup

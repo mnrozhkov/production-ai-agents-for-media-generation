@@ -2,9 +2,9 @@
 video_url: ""
 code:
   - label: Notebook (on your laptop)
-    path: code/first_image_local.ipynb
+    path: code/nb-first-generation-local.ipynb
   - label: Notebook (optional, JupyterLab on a GPU)
-    path: code/first_image_devlab.ipynb
+    path: code/nb-first-generation-devlab.ipynb
   - label: Image client
     path: code/image.py
 prev_url: 01-landscape.md
@@ -22,8 +22,8 @@ Serverless AI runs a container on a GPU without you managing VMs. The service is
 
 Pick one way to run this lesson:
 
-- **Option A (default): Jupyter on your laptop + an Endpoint.** You deploy Sana as an **Endpoint**, a container that serves HTTP requests at a public URL, and call it from [code/first_image_local.ipynb](code/first_image_local.ipynb). No local GPU needed.
-- **Option B: JupyterLab on a GPU.** You run the model inside a [GPU DevLab](https://docs.nebius.com/serverless/quickstart/devlabs), JupyterLab on a GPU VM, with [code/first_image_devlab.ipynb](code/first_image_devlab.ipynb). Pick it if you want the model in your own Python process.
+- **Option A (default): Jupyter on your laptop + an Endpoint.** You deploy Sana as an **Endpoint**, a container that serves HTTP requests at a public URL, and call it from [code/nb-first-generation-local.ipynb](code/nb-first-generation-local.ipynb). No local GPU needed.
+- **Option B: JupyterLab on a GPU.** You run the model inside a [GPU DevLab](https://docs.nebius.com/serverless/quickstart/devlabs), JupyterLab on a GPU VM, with [code/nb-first-generation-devlab.ipynb](code/nb-first-generation-devlab.ipynb). Pick it if you want the model in your own Python process.
 
 Complete the **Setup** section of the [module README](../01-consistent-media-generation-on-serverless-gpus/README.md) once: steps 1–3 (account and credits) for both options, steps 4–5 (clone, `uv`, Jupyter) for Option A.
 
@@ -41,7 +41,7 @@ Each model has a template in the [Serverless AI Cookbook](https://github.com/neb
 
 ### Connect from the notebook
 
-Open [code/first_image_local.ipynb](code/first_image_local.ipynb) and run step 1 (*Connect to your Endpoint*). Paste the URL and the token when it asks. The notebook saves them to `code/.env`, a file only you can read and Git ignores, so re-runs don't ask again. To enter them again, delete those lines and restart the kernel. The token is typed with `getpass` and never printed.
+Open [code/nb-first-generation-local.ipynb](code/nb-first-generation-local.ipynb) and run step 1 (*Connect to your Endpoint*). Paste the URL and the token when it asks. The notebook saves them to `code/.env`, a file only you can read and Git ignores, so re-runs don't ask again. To enter them again, delete those lines and restart the kernel. The token is typed with `getpass` and never printed.
 
 ### Wait until it's ready
 
@@ -165,7 +165,7 @@ Use this path if you want to run the same experiments, practice scenes and share
    uv run python -m ipykernel install --user --name course-gpu --display-name "course (GPU)"
    ```
 
-3. In JupyterLab choose **Kernel → Change kernel → course (GPU)**, then open [code/first_image_devlab.ipynb](code/first_image_devlab.ipynb) and run it top to bottom. Do not use the template's default conda kernel: its PyTorch pieces are built for different CUDA versions. The notebook loads Sana with Diffusers in fp16, with the text encoder and VAE in bf16: the model card and the Diffusers docs say they must stay in bf16 or fp32. [SanaPipeline](https://huggingface.co/docs/diffusers/api/pipelines/sana) <!-- c:M1-224 c:M1-225 -->
+3. In JupyterLab choose **Kernel → Change kernel → course (GPU)**, then open [code/nb-first-generation-devlab.ipynb](code/nb-first-generation-devlab.ipynb) and run it top to bottom. Do not use the template's default conda kernel: its PyTorch pieces are built for different CUDA versions. The notebook loads Sana with Diffusers in fp16, with the text encoder and VAE in bf16: the model card and the Diffusers docs say they must stay in bf16 or fp32. [SanaPipeline](https://huggingface.co/docs/diffusers/api/pipelines/sana) <!-- c:M1-224 c:M1-225 -->
 4. Download the `.zip` archive from the last step (`first-image.png`, `metrics.json`, comparison images, and `share-card.png`), then **delete** the DevLab: a stopped DevLab still bills its disk. [Stop and start](https://docs.nebius.com/serverless/maintenance/stop-start) <!-- c:M1-207 -->
 
 On our L40S, Sana peaked at `[measure]` GB of GPU memory and took `[measure]` s per image.

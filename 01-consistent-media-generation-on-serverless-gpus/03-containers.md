@@ -3,7 +3,7 @@ video_url: ""
 code:
   - label: What not to put in a GPU container
     path: code/docker/Dockerfile.bad
-  - label: The image worker container
+  - label: The worker container
     path: code/docker/Dockerfile
 prev_url: 02-first-generation.md
 next_url: 04-serving-vs-batch.md
@@ -11,7 +11,7 @@ next_url: 04-serving-vs-batch.md
 
 # 03 - Containers for Generative AI
 
-Say you have a worker that generates an image with Sana in a notebook. To run it on a cloud GPU, you package it as a container image. A container image is the easiest way to reproduce your runtime environment: the GPU host runs only what's in that image, and it doesn't know about your laptop, your virtual environment or the token in your shell. In this lesson we start from what goes wrong, trace each symptom to a line in a broken Dockerfile, and fix it. You're done when you can say, for each line of [code/docker/Dockerfile.bad](code/docker/Dockerfile.bad), what goes wrong on a GPU host and how [code/docker/Dockerfile](code/docker/Dockerfile) fixes it.
+Say you have a worker script that generates media on a GPU. Ours is [code/batch_inference.py](code/batch_inference.py): it makes gift cards with an image, a video and a speech model, and lesson 04 runs it. To run it on a cloud GPU, you package it as a container image. A container image is the easiest way to reproduce your runtime environment: the GPU host runs only what's in that image, and it doesn't know about your laptop, your virtual environment or the token in your shell. In this lesson we start from what goes wrong, trace each symptom to a line in a broken Dockerfile, and fix it. You're done when you can say, for each line of [code/docker/Dockerfile.bad](code/docker/Dockerfile.bad), what goes wrong on a GPU host and how [code/docker/Dockerfile](code/docker/Dockerfile) fixes it.
 
 Time and cost: about 20 minutes of reading. No GPU and no credits needed. You don't need Docker on your laptop for this course: it provides prebuilt images, and building locally is an optional extra at the end.
 
@@ -34,10 +34,12 @@ You can also build on a template's image, not only use it as is. The Sana templa
 ```dockerfile
 FROM cr.eu-north1.nebius.cloud/e00gw2b7v3pxetvpy7/sana-serve:660347b
 ENV HF_HOME=/cache/huggingface
-COPY common.py generate.py generation.json /app/
+COPY worker.py /app/
 RUN mkdir -p /cache /outputs
-CMD ["python", "/app/generate.py", "--n", "1", "--out", "/outputs/run"]
+CMD ["python", "/app/worker.py", "--out", "/outputs/run"]
 ```
+
+`worker.py` stands for your own script that uses the Sana stack.
 
 | You inherit | You add or change |
 | --- | --- |
@@ -45,7 +47,7 @@ CMD ["python", "/app/generate.py", "--n", "1", "--out", "/outputs/run"]
 | `serve.py`, `fastapi`, `uvicorn` (unused by the worker) | `CMD`: without it the container starts the template's server |
 | The template's choices: you get its pins, not yours | The weights cache path and `/outputs` |
 
-The example uses a tag to stay short; [section 1](#1-base-image-and-platform) explains pinning by digest. The rest of this lesson builds the same worker from the PyTorch base, so you see every line the template image hides.
+The example uses a tag to stay short; [section 1](#1-base-image-and-platform) explains pinning by digest. The rest of this lesson builds our worker from the PyTorch base, so you see every line a template image hides.
 
 ## What goes inside the image, and what stays outside
 
@@ -57,7 +59,7 @@ An **image** is the package you build and reuse. A **container** is a running in
 flowchart TB
     subgraph image["Container image · built once, reused across runs"]
         direction TB
-        code["APPLICATION LAYER<br/>generate.py · common.py · generation.json<br/>Changes most often"]
+        code["APPLICATION LAYER<br/>batch_inference.py · common.py · kids.csv<br/>Changes most often"]
         libs["DEPENDENCY LAYER<br/>Diffusers · Transformers · Accelerate<br/>Pinned versions"]
         base["BASE LAYERS<br/>CUDA runtime · Python · PyTorch<br/>Base image pinned by tag and digest"]
         code ~~~ libs ~~~ base
@@ -80,7 +82,7 @@ flowchart LR
 
     subgraph host["GPU host"]
         subgraph container["Running container · temporary"]
-            app["Worker process<br/>/app/generate.py"]
+            app["Worker process<br/>/app/batch_inference.py"]
             cache["Local model cache<br/>/cache/huggingface"]
             out["/outputs<br/>Mounted bucket"]
         end
@@ -141,7 +143,7 @@ WORKDIR /app
 RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install diffusers transformers
 RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('Efficient-Large-Model/Sana_1600M_1024px_diffusers')"
-CMD ["python", "generate.py", "--out", "/tmp/results"]
+CMD ["python", "batch_inference.py", "--out", "/tmp/results"]
 ```
 
 ### 1. Base image and platform
@@ -179,7 +181,7 @@ RUN pip install diffusers transformers
 # fixed: pinned installs first, then code
 RUN pip install diffusers==0.39.0 transformers==5.13.1 
 WORKDIR /app
-COPY common.py generate.py generation.json /app/
+COPY code/common.py code/batch_inference.py code/kids.csv /app/
 ```
 
 | Bad line | What goes wrong | Fix |
@@ -227,7 +229,7 @@ ENV HF_TOKEN=NOT_A_REAL_TOKEN
 COPY . /app
 
 # fixed: no token in the Dockerfile; copy named files only
-COPY common.py generate.py generation.json /app/
+COPY code/common.py code/batch_inference.py code/kids.csv /app/
 ```
 
 | Bad line         | What goes wrong                                                                                                           | Fix                                                                         |
@@ -239,9 +241,9 @@ COPY common.py generate.py generation.json /app/
 
 ```bash
 export HF_TOKEN=...                                  # in your shell, not in the Dockerfile
-docker run --rm -e HF_TOKEN sana-worker:local        # value taken from the shell
-docker run --rm -e HF_TOKEN=hf_xxx sana-worker:local # also valid, but the value is typed in the command
-docker run --rm --env-file .env sana-worker:local    # or several from a file that stays out of git and out of the build context
+docker run --rm -e HF_TOKEN santa-worker:local        # value taken from the shell
+docker run --rm -e HF_TOKEN=hf_xxx santa-worker:local # also valid, but the value is typed in the command
+docker run --rm --env-file .env santa-worker:local    # or several from a file that stays out of git and out of the build context
 ```
 
 **If a build step needs a secret, mount it for that one step.** Our worker doesn't, because it downloads nothing at build. When you do need one, a secret mount exists only during its `RUN` instruction and isn't stored in a layer. [Docker: build secrets](https://docs.docker.com/build/building/secrets/) 
@@ -255,17 +257,18 @@ RUN --mount=type=secret,id=hf_token \
 docker build --secret id=hf_token,env=HF_TOKEN .
 ```
 
-**Stray files: allowlist the build context.** [code/.dockerignore](code/.dockerignore) lists what may enter the build: the first line `*` excludes everything, then each `!file` lets one file back in. The last matching line wins. [Docker: build context](https://docs.docker.com/build/concepts/context/) 
+**Stray files: allowlist the build context.** The image is built from this module's folder, because the worker needs files from `code/` and one from `assets/`. That folder also holds `code/.env` and your local runs. [.dockerignore](.dockerignore) lists what may enter the build: the first line `*` excludes everything, then each `!path` lets one file or folder back in. The last matching line wins. [Docker: build context](https://docs.docker.com/build/concepts/context/) 
 
 ```text
 *
-!common.py
-!generate.py
-!generation.json
-!video.py
+!code/common.py
+!code/batch_inference.py
+!code/kids.csv
+!code/fonts/
+!assets/4_jingle.mp3
 ```
 
-The `video.py` line belongs to the video worker, which shares this folder. `COPY . /app` in this folder would be safe only because of this file. Don't rely on that: name the files in the Dockerfile too.
+`COPY . /app` here would be safe only because of this file. Don't rely on that: name the files in the Dockerfile too.
 
 > 💡 **On Nebius Serverless AI:** pass secrets with `--env-secret`; the value is read from SecretStash when the container starts. [Endpoints: manage](https://docs.nebius.com/serverless/endpoints/manage) 
 
@@ -273,11 +276,11 @@ The `video.py` line belongs to the video worker, which shares this folder. `COPY
 
 ```dockerfile
 # bad
-CMD ["python", "generate.py", "--out", "/tmp/results"]
+CMD ["python", "batch_inference.py", "--out", "/tmp/results"]
 
 # fixed
 RUN mkdir -p /outputs
-CMD ["python", "/app/generate.py", "--n", "1", "--out", "/outputs/run"]
+CMD ["python", "/app/batch_inference.py", "--n", "1", "--out", "/outputs/run"]
 ```
 
 | Bad line | What goes wrong | Fix |
@@ -292,17 +295,23 @@ This matters for a container that runs once and exits. A server that returns its
 
 ## The fixed Dockerfile
 
-All five fixes together, [code/docker/Dockerfile](code/docker/Dockerfile):
+All five fixes together, [code/docker/Dockerfile](code/docker/Dockerfile), built from the module folder with `docker buildx build --platform linux/amd64 -f code/docker/Dockerfile .`:
 
 ```dockerfile
 FROM pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_BREAK_SYSTEM_PACKAGES=1 HF_HOME=/cache/huggingface
+RUN apt-get update && apt-get install -y --no-install-recommends espeak-ng && rm -rf /var/lib/apt/lists/*
 RUN pip install diffusers==0.39.0 transformers==5.13.1 accelerate==1.14.0 sentencepiece==0.2.1 protobuf==6.33.0
+RUN pip install "kokoro>=0.9.2" ftfy imageio imageio-ffmpeg openai pillow
 WORKDIR /app
-COPY common.py generate.py generation.json /app/
+COPY code/common.py code/batch_inference.py code/kids.csv /app/
+COPY code/fonts /app/fonts
+COPY assets/4_jingle.mp3 /assets/4_jingle.mp3
 RUN mkdir -p /cache /outputs
-CMD ["python", "/app/generate.py", "--n", "1", "--out", "/outputs/run"]
+CMD ["python", "/app/batch_inference.py", "--n", "1", "--out", "/outputs/run"]
 ```
+
+`[placeholder: the second pip install line gets exact versions after the first build; until then it breaks fix 2]`
 
 
 ## References

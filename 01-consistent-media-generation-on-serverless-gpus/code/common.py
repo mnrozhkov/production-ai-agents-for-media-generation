@@ -6,7 +6,6 @@ import hashlib
 import json
 import math
 import os
-import re
 import statistics
 import time
 import urllib.error
@@ -15,9 +14,21 @@ from datetime import datetime, timezone
 from getpass import getpass
 from pathlib import Path
 
-DEFAULT_CONFIG = Path(__file__).with_name("generation.json")
+# The module's Sana settings: the model pinned to a Hub commit, and the sampling settings of lesson 02.
+SANA = {
+    "model": "Efficient-Large-Model/Sana_1600M_1024px_diffusers",
+    "model_revision": "ac0da2ff55fbe434795be0dce883042e4d49e2fc",
+    "variant": "fp16",
+    "prompt": (
+        "A centered Christmas storybook illustration of a brass telescope glowing softly on snow under a starry "
+        "night sky, surrounded by a small decorated Christmas tree, wrapped presents, twinkling lights, gentle "
+        "falling snow, warm vibrant colors, whimsical children's-book art style, no people, no text"
+    ),
+    "seed": 7,
+    "params": {"width": 512, "height": 512, "num_inference_steps": 20, "guidance_scale": 4.5, "negative_prompt": ""},
+    "image": None,
+}
 MODULE = "01-consistent-media-generation-on-serverless-gpus"
-SPOT_PRICE_API = "https://api.nebius.cloud/billing/v1alpha1/spot-price"  # public, no auth
 
 
 def positive(value):
@@ -27,39 +38,24 @@ def positive(value):
     return number
 
 
-def validate_config(value):
-    """Check a generation config dict (from a notebook cell or generation.json)."""
-    revision = value.get("model_revision")
-    if revision is not None and not re.fullmatch(r"[0-9a-f]{40}", revision):
-        raise ValueError("model_revision must be an immutable 40-char Hub commit")
-    if not value["prompt"].strip():
-        raise ValueError("prompt must not be empty")
-    if not isinstance(value["seed"], int) or not 0 <= value["seed"] < 2**63:
-        raise ValueError("seed must be a nonnegative integer below 2**63")
-    p = value["params"]
-    if not math.isfinite(p["guidance_scale"]) or p["guidance_scale"] < 0:
-        raise ValueError("guidance_scale must be finite and nonnegative")
-    for k in ("width", "height"):
-        if not isinstance(p[k], int) or p[k] % 32 or not 256 <= p[k] <= 2048:
-            raise ValueError(f"invalid {k}: use a multiple of 32 between 256 and 2048")
-    if not 1 <= p["num_inference_steps"] <= 100:
-        raise ValueError("steps must be between 1 and 100")
-    return value
+def load_pipeline(cfg=SANA):
+    """Load the Sana Diffusers pipeline onto the GPU. Used by image.py (lesson 02) and batch_inference.py (lesson 04)."""
+    import torch
+    from diffusers import SanaPipeline
 
-
-def config(path=DEFAULT_CONFIG):
-    """Load and check a generation config file (used by the Job worker in lesson 04)."""
-    value = json.loads(Path(path).read_text())
-    if value.get("model_revision") is None:
-        raise ValueError("model_revision must be pinned in a config file")
-    return validate_config(value)
-
-
-def as_config(cfg_or_path):
-    """Accept a config dict or a path to a JSON config; return a checked copy."""
-    if isinstance(cfg_or_path, dict):
-        return validate_config(json.loads(json.dumps(cfg_or_path)))
-    return config(cfg_or_path)
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA unavailable; select a GPU runtime with CUDA-enabled PyTorch")
+    pipe = SanaPipeline.from_pretrained(
+        cfg["model"],
+        revision=cfg.get("model_revision"),
+        variant=cfg.get("variant", "fp16"),
+        torch_dtype=torch.float16,
+    ).to("cuda")
+    # Sana recipe: fp16 transformer, bf16 text encoder and VAE to prevent black images.
+    pipe.text_encoder.to(torch.bfloat16)
+    pipe.vae.to(torch.bfloat16)
+    pipe.set_progress_bar_config(disable=True)
+    return pipe
 
 
 def load_dotenv(path):
@@ -164,23 +160,6 @@ def write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")
 
 
-def emit(out, event, **details):
-    with (Path(out) / "trace.jsonl").open("a") as f:
-        f.write(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "run_id": Path(out).name,
-                    "event": event,
-                    **details,
-                },
-                allow_nan=False,
-            )
-            + "\n"
-        )
-
-
 def metrics(cfg, mode):
     return {
         "schema_version": 1,
@@ -208,13 +187,6 @@ def asset_record(path):
         "bytes": len(data),
         "sha256": hashlib.sha256(data).hexdigest(),
     }
-
-
-def interval(start, finish):
-    a, b = (datetime.fromisoformat(s.replace("Z", "+00:00")) for s in (start, finish))
-    if a.tzinfo is None or b.tzinfo is None or b < a:
-        raise ValueError("timestamps need timezones and chronological order")
-    return (b - a).total_seconds()
 
 
 def calculate_cost(
