@@ -23,7 +23,8 @@ if os.getenv("MCP_FAKE"):
 else:
     env = settings("SANA_BASE_URL", "SANA_TOKEN", "SANA_ENDPOINT_ID", ask=False)
     images = SanaEndpoint(env["SANA_BASE_URL"], env["SANA_TOKEN"], env["SANA_ENDPOINT_ID"])
-store = Store(run_folder(os.getenv("RUN_ID", "mcp")), bucket=optional_setting("BUCKET"))
+LESSON = "03-gpu-tools"  # assets go to code/runs/03-gpu-tools/<RUN_ID or mcp>/
+store = Store(run_folder(os.getenv("RUN_ID", "mcp"), LESSON), bucket=optional_setting("BUCKET"))
 
 
 @server.tool()

@@ -41,14 +41,23 @@ from tools import (
     Store,
     generate_image,
     gpu_cost,
+    llm_model,
     optional_setting,
     settings,
-    token_factory_model,
 )
-from tracing import LLMPrice, Tracer, last_tool_return, new_run_id, run_traced, write_metrics
+from tracing import (
+    LLMPrice,
+    Tracer,
+    last_tool_return,
+    new_run_id,
+    repo_path,
+    run_traced,
+    write_metrics,
+)
 from video_tool import VideoDeps, VideosAPI, drive, fake_video_model, generate_video
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
+LESSON = "05-judge-loop"  # runs go to code/runs/05-judge-loop/<run_id>/
 
 # Caps live in code, not in the prompt
 KEYFRAME_ATTEMPTS = 3
@@ -190,7 +199,7 @@ async def judge_keyframe(
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
             "cost_usd": price.cost(tokens_in, tokens_out) if price else 0.0,
-            "asset_ref": asset_ref or str(png),
+            "asset_ref": asset_ref or repo_path(png),
         }
         try:
             reply = parse_reply(result.output)
@@ -220,7 +229,7 @@ def check_keyframe(png: Path, tracer: Tracer, attempt: int) -> bool:
         "check",
         "keyframe_file",
         attempt=attempt,
-        asset_ref=str(png),
+        asset_ref=repo_path(png),
         reasons=[] if ok else ["missing, or not 832x480"],
     )
     return ok
@@ -250,7 +259,7 @@ def check_video(path: Path, tracer: Tracer, fake: bool) -> bool:
                 reasons.append(f"duration {float(out):.2f} s, asked {WAN_I2V.duration_s:.2f} s")
         else:
             print("[yellow]ffprobe not found: video duration not checked[/yellow]")
-    tracer.emit("check", "video_file", asset_ref=str(path), reasons=reasons)
+    tracer.emit("check", "video_file", asset_ref=repo_path(path), reasons=reasons)
     return not reasons
 
 
@@ -397,7 +406,7 @@ async def review(
     price: LLMPrice | None = None,
 ) -> str:
     """Plan -> keyframe -> judge -> (regenerate) -> video -> checks. Returns the stop reason."""
-    tracer = Tracer(new_run_id())
+    tracer = Tracer(new_run_id(), LESSON)
     print(f"Run ID: [bold]{tracer.run_id}[/bold]")
     store = Store(tracer.folder, bucket=None if fake else optional_setting("BUCKET"))
     if fake:
@@ -419,7 +428,7 @@ async def review(
             "WAN22_I2V_ENDPOINT_ID",
             secret=("SANA_TOKEN", "WAN22_I2V_TOKEN"),
         )
-        model, judge_model = token_factory_model(LLM), token_factory_model(JUDGE)
+        model, judge_model = llm_model(LLM), llm_model(JUDGE)
         images = SanaEndpoint(env["SANA_BASE_URL"], env["SANA_TOKEN"], env["SANA_ENDPOINT_ID"])
         videos = VideosAPI(
             env["WAN22_I2V_BASE_URL"], env["WAN22_I2V_TOKEN"], env["WAN22_I2V_ENDPOINT_ID"]
@@ -440,7 +449,7 @@ async def review(
         tracer.stop(reason)
         write_metrics(tracer, fixture_run=bool(fixture), session_spend_usd=None)
         store.upload_run()
-        print(f"Stop: [bold]{reason}[/bold]. Trace: {tracer.path}")
+        print(f"Stop: [bold]{reason}[/bold]. Trace: {repo_path(tracer.path)}")
         return reason
 
     # 1. Plan: a typed call inside a fixed stage
@@ -583,7 +592,7 @@ def ask_person(call) -> bool:
 async def two_agents(brief: Brief, rubric: Rubric, keyframes: list[Path]) -> None:
     """Scripted, no GPU: the planner calls a reviewer agent as a tool and gets a Verdict back."""
     block_real_models()
-    tracer = Tracer(new_run_id())
+    tracer = Tracer(new_run_id(), LESSON)
     paths = []
     for k in keyframes:  # copies in the run folder: placeholders if the fixtures aren't saved yet
         paths.append(tracer.folder / k.name)
@@ -612,7 +621,7 @@ async def two_agents(brief: Brief, rubric: Rubric, keyframes: list[Path]) -> Non
     print(
         f"Two agents: {sum(e.kind == 'model_request' for e in events)} planner requests, "
         f"{sum(e.kind == 'tool_call' for e in events)} handoffs, "
-        f"{sum(e.kind == 'judge' for e in events)} judge calls. Trace: {tracer.path}"
+        f"{sum(e.kind == 'judge' for e in events)} judge calls. Trace: {repo_path(tracer.path)}"
     )
 
 

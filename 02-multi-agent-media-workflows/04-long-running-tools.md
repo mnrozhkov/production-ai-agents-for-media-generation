@@ -203,7 +203,7 @@ uv run python video_tool.py resume <run_id> --fake
 | Kill after submit, before the `video_id` is saved, resume | `intent`, `reconciled`, `completed` | `done` | 1 |
 | Deadline passed, then resume | `intent`, `pending` (`poll_timeout`), then `completed` | `poll_timeout`, then `done` | 1 |
 
-Check each with `check_trace.py`: `attempts.video` counts distinct video requests in the trace. The scripted resume trace is required evidence in Homework 2.
+Check each run's `metrics.json`: `attempts.video` counts distinct video requests in the trace, and `contract_problems` should be empty. The scripted resume trace is required evidence in Homework 2.
 
 The full matrix (kill after `intent`, two restarts while pending, an Endpoint restart while pending) runs as maintainer tests.
 

@@ -110,7 +110,7 @@ Optional: one cell generates 10 more images and prints the median and p95 genera
 | --- | --- | --- |
 | `wait_ready` runs for minutes, then `TimeoutError` | The Endpoint is still loading weights, or failed to start | Check its logs in the console. Stop it if it failed |
 | `401` or `403` | Wrong or missing token | Fix `SANA_TOKEN` in `code/.env` |
-| `502`/`503` for a while after `RUNNING` | Weights still loading | `generate()` retries these up to 3 times; `wait_ready()` first avoids them |
+| `502`/`503` for a while after `RUNNING` | Weights still loading | Call `wait_ready()` first. During a generation, `generate()` treats `502`/`503`/`504` as uncertain and raises `UncertainSubmission` instead of resending |
 | `Timed out after … seconds` in the trace, two GPU requests | Tool timeout below the generation time | Raise it above p95 (2.2) |
 | A size the model doesn't accept | The model asked for a size outside `Size` | A validation retry fixes it before any GPU call (2.2) |
 | The bill keeps growing after the lesson | The Endpoint is still `RUNNING` | Teardown below |
@@ -161,7 +161,7 @@ From an IDE agent, register the server with its own config. Most clients take a 
 }
 ```
 
-Then ask the IDE agent for a keyframe and look for the PNG in `code/runs/02-multi-agent-media-workflows/mcp/`.
+Then ask the IDE agent for a keyframe and look for the PNG in `code/runs/03-gpu-tools/mcp/`.
 
 ## Notes
 

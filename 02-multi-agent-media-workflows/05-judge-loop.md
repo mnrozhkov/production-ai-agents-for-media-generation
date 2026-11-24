@@ -154,7 +154,7 @@ uv run python review_loop.py --fake --fixture ../assets/fixtures/bad_keyframe.pn
 ```text
 Attempt 1: RETRY ['scripted: a must_show item is missing']
 Attempt 2: PASS []
-Stop: done. Trace: runs/02-multi-agent-media-workflows/<run_id>/events.jsonl
+Stop: done. Trace: runs/05-judge-loop/<run_id>/events.jsonl
 ```
 
 ## Break it on purpose

@@ -50,13 +50,22 @@ from tools import (
     Store,
     ToolDeps,
     gpu_cost,
+    llm_model,
     optional_setting,
     settings,
     spec_hash,
-    token_factory_model,
 )
-from tracing import LLMPrice, Tracer, load_messages, new_run_id, run_traced, write_metrics
+from tracing import (
+    LLMPrice,
+    Tracer,
+    load_messages,
+    new_run_id,
+    repo_path,
+    run_traced,
+    write_metrics,
+)
 
+LESSON = "04-long-running-tools"  # runs go to code/runs/04-long-running-tools/<run_id>/
 WAN_IMAGE = "vllm/vllm-omni:v0.24.0"  # the template's container image, part of the spec hash
 KILL_AT: str | None = None  # --kill-at: where this process kills itself, for the lesson demo
 
@@ -486,7 +495,7 @@ MOTION = "The developer lifts the cup, takes a slow sip and leans back; steam ri
 
 
 def make_deps(run_id: str, fake: bool, gpu_price_per_hour: float | None) -> VideoDeps:
-    tracer = Tracer(run_id)
+    tracer = Tracer(run_id, LESSON)
     if fake:
         videos = PlaceholderVideos(tracer.folder, render_s=3.0)
         return VideoDeps(tracer, PlaceholderImages(), Store(tracer.folder), videos=videos)
@@ -509,7 +518,7 @@ def finish(deps: VideoDeps, output: str | None) -> None:
         print(f"[green]{output}[/green]")
     write_metrics(deps.tracer)
     deps.store.upload_run()
-    print(f"Trace: {deps.tracer.path}")
+    print(f"Trace: {repo_path(deps.tracer.path)}")
 
 
 @app.command()
@@ -538,7 +547,7 @@ def run(
     print(f"Run ID: [bold]{run_id}[/bold]")
     if fake:
         block_real_models()
-    model = fake_video_model(motion_prompt, uri) if fake else token_factory_model()
+    model = fake_video_model(motion_prompt, uri) if fake else llm_model()
     price = LLMPrice(input_per_m=llm_price_in, output_per_m=llm_price_out) if llm_price_in else None
     prompt = f"Motion prompt: {motion_prompt}\nKeyframe URI: {uri}"
     output = asyncio.run(
@@ -575,7 +584,7 @@ def resume(
     if fake:
         block_real_models()
     uri = deps.store.uri("keyframe.png")
-    model = fake_video_model(motion_prompt, uri) if fake else token_factory_model()
+    model = fake_video_model(motion_prompt, uri) if fake else llm_model()
     price = LLMPrice(input_per_m=llm_price_in, output_per_m=llm_price_out) if llm_price_in else None
     output = asyncio.run(
         drive(
