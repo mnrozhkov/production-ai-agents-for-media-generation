@@ -31,12 +31,12 @@ You're done when:
 * you can say whether your Homework 2 brief needs an agent, a workflow or a hybrid, and why.
 
 Time: about 30 minutes.
-Cost: free in `"fake"` mode. A few cents of tokens in `"fake-gpu"` mode [measure].
+Cost: free in `"fake"` mode. A few cents of tokens in `"real-llm"` mode [measure].
 
 ## Before you start
 
 * Complete the **Setup** section of the [module README](README.md) once.
-* For `"fake-gpu"` mode: a Token Factory API key. The notebook asks for it once and saves it to `code/.env`.
+* For `"real-llm"` mode: a Token Factory API key. The notebook asks for it once and saves it to `code/.env`.
 
 ## Run the lesson
 
@@ -47,9 +47,9 @@ The mode cell at the top chooses the LLM:
 | `MODE` | LLM | Image tool | Cost |
 | --- | --- | --- | --- |
 | `"fake"` | A Python function plays the LLM | Placeholder PNG | Free, no network |
-| `"fake-gpu"` | A real LLM on Token Factory | Placeholder PNG | A few cents of tokens |
+| `"real-llm"` | A real LLM on Token Factory | Placeholder PNG | A few cents of tokens |
 
-`"fake-gpu"` means the GPU is fake, not the LLM. Start with `"fake"`, then switch to `"fake-gpu"`: edit the mode cell and run it again, then rerun the cells from "Swap in the real LLM" down. No kernel restart needed.
+The image tool is fake in both modes. Start with `"fake"`, then switch to `"real-llm"`: edit the mode cell and run it again, then rerun the cells from "Swap in the real LLM" down. No kernel restart needed.
 
 The notebook covers, in order:
 

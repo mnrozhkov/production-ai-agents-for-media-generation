@@ -1,6 +1,6 @@
 """Offline stand-ins for Module 2: a scripted model and placeholder GPU backends.
 
-No network, no GPU, no credits. MODE = "fake" uses all of them; MODE = "fake-gpu" keeps
+No network, no GPU, no credits. MODE = "fake" uses all of them; MODE = "real-llm" keeps
 the real LLM and uses only the placeholder GPU backends.
 """
 

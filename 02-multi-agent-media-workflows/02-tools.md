@@ -24,12 +24,12 @@ You're done when:
 * a second identical `generate_image` call is a cache hit, with no GPU time and no cost.
 
 Time: about 25 minutes.
-Cost: free in `"fake"` mode. A few cents of tokens in `"fake-gpu"` mode [measure]. No GPU in this lesson.
+Cost: free in `"fake"` mode. A few cents of tokens in `"real-llm"` mode [measure]. No GPU in this lesson.
 
 ## Before you start
 
 * Complete the **Setup** section of the [module README](README.md) once.
-* For `"fake-gpu"` mode: a Token Factory API key in `code/.env`. The notebook asks for it if it's missing.
+* For `"real-llm"` mode: a Token Factory API key in `code/.env`. The notebook asks for it if it's missing.
 
 ## Run the lesson
 
@@ -40,9 +40,9 @@ The mode cell at the top chooses the LLM:
 | `MODE` | LLM | Image backend | Cost |
 | --- | --- | --- | --- |
 | `"fake"` | A scripted model: a fixed list of replies | Placeholder PNG | Free, no network |
-| `"fake-gpu"` | A real LLM on Token Factory, for the validation and plan demos | Placeholder PNG | A few cents of tokens |
+| `"real-llm"` | A real LLM on Token Factory, for the validation and plan demos | Placeholder PNG | A few cents of tokens |
 
-`"fake-gpu"` means the GPU is fake, not the LLM. To switch, edit the mode cell and run it again. No kernel restart needed.
+The image backend is fake in both modes. To switch, edit the mode cell and run it again. No kernel restart needed.
 
 The notebook has one section per demo:
 
