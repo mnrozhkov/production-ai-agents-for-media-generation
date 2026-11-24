@@ -25,9 +25,13 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 
-def block_real_models() -> None:
-    """Make any request to a real LLM fail, so a fake run can't spend tokens by accident."""
-    pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
+def block_real_models(block: bool = True) -> None:
+    """Make any request to a real LLM fail, so a fake run can't spend tokens by accident.
+
+    The switch is process-wide and stays set in a notebook kernel. block=False turns real
+    requests back on, so a notebook can change MODE without a restart.
+    """
+    pydantic_ai.models.ALLOW_MODEL_REQUESTS = not block
 
 
 # ---------------------------------------------------------------------------

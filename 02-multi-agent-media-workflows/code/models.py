@@ -87,7 +87,7 @@ class VideoSpec(BaseModel):
 
 # Candidate IDs from the Token Factory docs examples. [verify: T3 bench pins the LLM,
 # T9 pins the judge]. Model IDs on Token Factory change; change them here only.
-LLM = LLMSpec(model="meta-llama/Meta-Llama-3.1-70B-Instruct")
+LLM = LLMSpec(model="Qwen/Qwen3-30B-A3B-Instruct-2507")
 JUDGE = LLMSpec(model="Qwen/Qwen2-VL-72B-Instruct")
 
 # Same Sana revision as Module 1. 832x480 so the keyframe matches the video frame.
