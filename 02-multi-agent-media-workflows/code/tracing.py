@@ -20,8 +20,8 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-MODULE = "02-multi-agent-media-workflows"
-RUNS = Path(__file__).resolve().parent / "runs" / MODULE
+RUNS = Path(__file__).resolve().parent / "runs"  # one folder per lesson: runs/<lesson>/<run_id>/
+REPO_ROOT = Path(__file__).resolve().parents[2]  # code/ -> module folder -> repository root
 
 Kind = Literal["model_request", "tool_call", "judge", "check", "ticket", "budget", "node"]
 STOP_REASONS = (
@@ -91,9 +91,19 @@ def new_run_id() -> str:
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:4]
 
 
-def run_folder(run_id: str) -> Path:
-    """Return code/runs/02-multi-agent-media-workflows/<run_id>/, created if missing."""
-    folder = RUNS / run_id
+def repo_path(path: str | Path) -> str:
+    """Return a path relative to the repository root, for printing and for what the model sees.
+
+    Short, the same on every machine, and no home folder in a prompt. A path outside the
+    repository comes back unchanged.
+    """
+    path = Path(path).resolve()
+    return str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path)
+
+
+def run_folder(run_id: str, lesson: str) -> Path:
+    """Return code/runs/<lesson>/<run_id>/, created if missing. lesson: e.g. "02-tools"."""
+    folder = RUNS / lesson / run_id
     folder.mkdir(parents=True, exist_ok=True)
     return folder
 
@@ -109,9 +119,9 @@ def read_events(path: str | Path) -> list[Event]:
 class Tracer:
     """Append events to <run folder>/events.jsonl. Reopening a run keeps appending to it."""
 
-    def __init__(self, run_id: str):
+    def __init__(self, run_id: str, lesson: str):
         self.run_id = run_id
-        self.folder = run_folder(run_id)
+        self.folder = run_folder(run_id, lesson)
         self.path = self.folder / "events.jsonl"
         self.framework_run_id: str | None = None
         # tool call ID -> event_id of the model request that issued it (parent of the tool call)
@@ -278,9 +288,62 @@ def summarize(events: list[Event]) -> dict[str, Any]:
     }
 
 
+PAID_KINDS = ("model_request", "judge", "tool_call", "ticket")
+
+
+def check(events: list[Event]) -> list[str]:
+    """Return every violation of the trace contract; an empty list means the trace passes."""
+    problems: list[str] = []
+    seen: dict[str, Event] = {}
+    for i, e in enumerate(events, 1):
+        where = f"line {i} ({e.kind} {e.name})"
+        if e.event_id in seen:
+            problems.append(f"{where}: duplicate event_id")
+        if e.parent_id and e.parent_id not in seen:
+            problems.append(f"{where}: parent_id points to no earlier event")
+        if e.cost_usd < 0:
+            problems.append(f"{where}: negative cost")
+        if e.cost_usd and e.kind not in PAID_KINDS:
+            problems.append(f"{where}: {e.kind} events cost nothing")
+        if e.kind == "ticket" and e.cost_usd and e.name not in ("completed", "failed"):
+            problems.append(f"{where}: a video is charged once, on completed or failed")
+        if e.cache_hit and (e.cost_usd or e.t_gen_s is not None):
+            problems.append(f"{where}: a cache hit has cost_usd 0 and t_gen_s null")
+        if e.possible_duplicate and e.kind != "ticket":
+            problems.append(f"{where}: possible_duplicate is for ticket events")
+        if e.stop_reason and e.stop_reason not in STOP_REASONS:
+            problems.append(f"{where}: unknown stop_reason {e.stop_reason!r}")
+        if e.kind == "node" and (e.tokens_in or e.tokens_out):
+            problems.append(f"{where}: node events carry no tokens")
+        if e.kind == "model_request" and (e.workload != "llm" or e.tokens_in is None):
+            problems.append(f"{where}: model_request needs workload llm and tokens")
+        if e.kind == "tool_call":
+            parent = seen.get(e.parent_id or "")
+            if not e.call_id:
+                problems.append(f"{where}: tool_call without call_id")
+            elif parent is None or e.call_id not in (parent.tool_call_ids or []):
+                problems.append(f"{where}: call_id is not linked to the model request")
+        if e.kind == "judge":
+            if e.rubric_version is None or e.judge_model is None or e.reasons is None:
+                problems.append(f"{where}: judge needs rubric_version, judge_model, reasons")
+        elif e.verdict or e.rubric_version:
+            problems.append(f"{where}: verdict and rubric_version are for judge events")
+        seen[e.event_id] = e
+    return problems
+
+
 def write_metrics(tracer: Tracer, **extra: Any) -> dict[str, Any]:
-    """Write metrics.json next to events.jsonl and return it."""
-    metrics = {"schema_version": 1, "run_id": tracer.run_id, **summarize(tracer.events())}
+    """Write metrics.json next to events.jsonl and return it.
+
+    Also checks the trace against the contract. Problems are printed and saved as
+    contract_problems; they never stop the run, because the GPU work is already paid for.
+    """
+    events = tracer.events()
+    problems = check(events)
+    for problem in problems:
+        print(f"Trace contract: {problem}")
+    metrics = {"schema_version": 1, "run_id": tracer.run_id, **summarize(events)}
+    metrics["contract_problems"] = problems
     metrics.update(extra)
     (tracer.folder / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
     return metrics

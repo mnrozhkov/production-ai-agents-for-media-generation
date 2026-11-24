@@ -67,7 +67,7 @@ One page per lesson at the module root, all code flat in `code/` (files import e
 │   ├── brief.yaml                  # the lesson brief: the Brief fields Homework 2 uses too
 │   ├── rubric.yaml                 # 2.5: rubric v1, criteria that read Brief fields
 │   ├── fixtures/                   # 2.5: bad and good keyframe with their expected verdicts
-│   └── worked-trace/               # a hand-written trace and its totals, for check_trace.py
+│   └── worked-trace/               # a hand-written trace and its expected totals
 └── code/
     ├── .env                        # you create it: Token Factory key, Endpoint URLs and tokens (git-ignored)
     ├── nb-agent-loop.ipynb         # 2.1: be the LLM, swap in Token Factory, agent.iter(), limits, state
@@ -78,20 +78,19 @@ One page per lesson at the module root, all code flat in `code/` (files import e
     ├── nb-judge.ipynb              # 2.5: rubric v1 and the judge on both fixtures
     ├── review_loop.py              # 2.5: planner, generator, reviewer loop with caps and budget guard
     ├── tools.py                    # 2.2–2.5: generate_image, spec hash, Sana backend, settings, Store
-    ├── tracing.py                  # all: events.jsonl writer, run_traced(), totals, metrics.json
-    ├── check_trace.py              # all: check a trace against the field contract, print totals
+    ├── tracing.py                  # all: events.jsonl writer, run_traced(), totals, contract check, metrics.json
     ├── fake.py                     # all: scripted model, placeholder image and video backends
     └── models.py                   # all: pinned model specs (LLM, judge, Sana, Wan2.2), Brief, Plan
 ```
 
-Every run writes to `code/runs/02-multi-agent-media-workflows/<run_id>/`: `events.jsonl`, `messages.json`, `metrics.json`, `tickets/` and the assets. With `BUCKET` set in `code/.env`, assets and run files are also copied to `s3://<bucket>/runs/02-multi-agent-media-workflows/<run_id>/`.
+Every run writes to `code/runs/<lesson>/<run_id>/`, for example `code/runs/02-tools/<run_id>/`: `events.jsonl`, `messages.json`, `metrics.json`, `tickets/` and the assets. With `BUCKET` set in `code/.env`, assets and run files are also copied to `s3://<bucket>/runs/<lesson>/<run_id>/`.
 
 ## Setup
 
 Do this once, before any lesson in this module.
 
 1. **Module 1 setup:** a Nebius account with credits and the repository cloned. See the [Module 1 README](../01-consistent-media-generation-on-serverless-gpus/README.md).
-2. **A Token Factory API key** from [Nebius Token Factory](https://docs.tokenfactory.nebius.com/quickstart). The notebooks ask for it once and save it to `code/.env` as `NEBIUS_API_KEY`.
+2. **An LLM API key.** The default is [Nebius Token Factory](https://docs.tokenfactory.nebius.com/quickstart); the notebooks ask for the key once and save it to `code/.env` as `NEBIUS_API_KEY`. Any OpenAI-compatible API with tool calling works too: set `LLM` in `code/models.py` (see [2.1](01-agent-loop.md#use-another-llm)).
 3. **Install and start Jupyter** from the repository root:
 
    ```bash

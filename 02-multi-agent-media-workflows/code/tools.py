@@ -2,10 +2,13 @@
 
 Three kinds of retry, kept apart on purpose:
 - Validation retry: bad arguments go back to the model (schema error or ModelRetry). No GPU call.
-- Transport retry: the request never reached the model (connect timeout, 502/503 while the
-  Endpoint loads). Retried with backoff, at most TRANSPORT_RETRIES times.
+- Transport retry: the connection never opened (connect timeout), so nothing reached the
+  Endpoint. Retried with backoff, at most TRANSPORT_RETRIES times.
 - Uncertain submission: the request may have reached the GPU (read timeout, dropped
-  connection). Never resent here. Short tools fail; long tools keep a ticket (video_tool.py).
+  connection, or 502/503/504 after sending: a gateway status doesn't prove the generation
+  never started). Never resent here: POST isn't idempotent (RFC 9110, section 9.2.2).
+  Short tools raise UncertainSubmission; long tools keep a ticket (video_tool.py).
+  Call wait_ready() before the first request, so a loading Endpoint doesn't cause these.
 """
 
 from __future__ import annotations
@@ -30,10 +33,15 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from models import LLM, SANA, LLMSpec
-from tracing import Tracer
+from tracing import Tracer, repo_path
 
 CODE_DIR = Path(__file__).resolve().parent
 TRANSPORT_RETRIES = 3
+
+
+class UncertainSubmission(RuntimeError):
+    """The request may have reached the GPU. Check the Endpoint before you send it again."""
+
 
 # ---------------------------------------------------------------------------
 # Settings and credentials: read on the tool side, never sent to the model
@@ -77,10 +85,14 @@ def settings(*keys: str, secret: tuple[str, ...] = (), ask: bool = True) -> dict
     return {key: saved[key] for key in keys}
 
 
-def token_factory_model(spec: LLMSpec = LLM) -> OpenAIChatModel:
-    """Return a PydanticAI model for a Token Factory LLM. The key stays in code/.env."""
-    key = settings("NEBIUS_API_KEY", secret=("NEBIUS_API_KEY",))["NEBIUS_API_KEY"]
-    provider = OpenAIProvider(base_url=spec.base_url, api_key=key)
+def llm_api_key(spec: LLMSpec = LLM) -> str:
+    """Return the API key for an LLM spec from code/.env or the environment; ask once if missing."""
+    return settings(spec.api_key_env, secret=(spec.api_key_env,))[spec.api_key_env]
+
+
+def llm_model(spec: LLMSpec = LLM) -> OpenAIChatModel:
+    """Return a PydanticAI model for an LLM on any OpenAI-compatible API (Token Factory by default)."""
+    provider = OpenAIProvider(base_url=spec.base_url, api_key=llm_api_key(spec))
     return OpenAIChatModel(spec.model, provider=provider)
 
 
@@ -95,7 +107,7 @@ class Store:
     def __init__(self, folder: Path, bucket: str | None = None):
         self.folder = folder
         self.bucket = bucket
-        self.prefix = "runs/" + "/".join(folder.parts[-2:])  # runs/<module>/<run_id>
+        self.prefix = "runs/" + "/".join(folder.parts[-2:])  # runs/<lesson>/<run_id>
         endpoint = optional_setting("S3_ENDPOINT_URL") or "https://storage.eu-north1.nebius.cloud"
         self._s3 = boto3.client("s3", endpoint_url=endpoint) if bucket else None
 
@@ -106,8 +118,10 @@ class Store:
         return self.path(name).exists()
 
     def uri(self, name: str) -> str:
-        """Bucket URI when a bucket is set, else the local path."""
-        return f"s3://{self.bucket}/{self.prefix}/{name}" if self.bucket else str(self.path(name))
+        """Bucket URI when a bucket is set, else the local path relative to the repository root."""
+        if self.bucket:
+            return f"s3://{self.bucket}/{self.prefix}/{name}"
+        return repo_path(self.path(name))
 
     def put(self, name: str, data: bytes) -> str:
         """Save bytes to the run folder (and the bucket); return the URI."""
@@ -202,7 +216,7 @@ class SanaEndpoint:
         raise TimeoutError("Endpoint not ready: check its logs in the console, then stop it")
 
     async def generate(self, prompt: str, *, seed: int, width: int, height: int) -> bytes:
-        """Generate one PNG. Retries only failures where the request never reached the model."""
+        """Generate one PNG. Retries only a connection that never opened; see the module docstring."""
         body = {
             "model": SANA.model,
             "prompt": prompt,
@@ -223,13 +237,16 @@ class SanaEndpoint:
                     headers=self.headers,
                     timeout=(10, 300),
                 )
-            except requests.ConnectTimeout:
-                r = None  # transport: never connected, safe to retry
-            if r is not None and r.status_code not in (502, 503):
                 break
-            if attempt == TRANSPORT_RETRIES:
-                raise RuntimeError("Endpoint unreachable or not ready after retries")
-            await asyncio.sleep(2**attempt)
+            except requests.ConnectTimeout:  # never connected: nothing reached the Endpoint
+                if attempt == TRANSPORT_RETRIES:
+                    raise RuntimeError("Endpoint unreachable after retries") from None
+                await asyncio.sleep(2**attempt)
+        if r.status_code in (502, 503, 504):  # sent, then the gateway failed: uncertain
+            raise UncertainSubmission(
+                f"HTTP {r.status_code} after sending: the image may still be generating. "
+                "Check the Endpoint before you send it again."
+            )
         r.raise_for_status()  # 4xx: our request is wrong; read timeouts propagate (uncertain)
         return base64.b64decode(r.json()["data"][0]["b64_json"])
 

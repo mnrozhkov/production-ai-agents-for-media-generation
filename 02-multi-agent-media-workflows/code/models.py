@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Token Factory is OpenAI-compatible. Base URL from its quickstart.
+# The default LLM provider. Token Factory is OpenAI-compatible. Base URL from its quickstart.
 TOKEN_FACTORY_URL = "https://api.tokenfactory.nebius.com/v1/"
 
 
@@ -17,12 +17,16 @@ TOKEN_FACTORY_URL = "https://api.tokenfactory.nebius.com/v1/"
 
 
 class LLMSpec(BaseModel):
-    """An LLM on an OpenAI-compatible API."""
+    """An LLM on any OpenAI-compatible API.
+
+    api_key_env names the key in code/.env (or the environment) that holds the API key.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     model: str
     base_url: str = TOKEN_FACTORY_URL
+    api_key_env: str = "NEBIUS_API_KEY"
 
 
 class ImageSpec(BaseModel):
@@ -87,6 +91,12 @@ class VideoSpec(BaseModel):
 
 # Candidate IDs from the Token Factory docs examples. [verify: T3 bench pins the LLM,
 # T9 pins the judge]. Model IDs on Token Factory change; change them here only.
+#
+# The agent's LLM. Any OpenAI-compatible API with tool calling works: set model, base_url
+# and api_key_env. The notebooks ask for the key once and save it to code/.env. Examples:
+#   LLM = LLMSpec(model="<model id>", base_url="https://api.openai.com/v1", api_key_env="OPENAI_API_KEY")
+#   LLM = LLMSpec(model="<model id>", base_url="http://localhost:11434/v1", api_key_env="OLLAMA_API_KEY")
+# Ollama accepts any non-empty key.
 LLM = LLMSpec(model="Qwen/Qwen3-30B-A3B-Instruct-2507")
 JUDGE = LLMSpec(model="Qwen/Qwen2-VL-72B-Instruct")
 
